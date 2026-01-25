@@ -30,6 +30,9 @@ export interface User {
     interestedIn: ('male' | 'female')[];
   };
   verified: boolean;
+  verificationStatus?: 'unverified' | 'pending' | 'verified' | 'rejected' | string;
+  verificationPhotoUrl?: string | null;
+  verifiedAt?: string | null;
   createdAt: string;
   lastActive: string;
   stats?: {
@@ -77,6 +80,8 @@ export interface Message {
   deletedForEveryone?: boolean;
   deletedAt?: string;
   deletedBy?: string;
+  riskScore?: number;
+  riskFlags?: string[];
 }
 
 export interface Conversation {

@@ -52,6 +52,7 @@ export const Messages: React.FC = () => {
   const messageMenuRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const RISK_FLAG_THRESHOLD = 40;
 
   useEffect(() => {
     const init = async () => {
@@ -202,6 +203,16 @@ export const Messages: React.FC = () => {
   const conversationMessages = selectedConversationId
     ? (messages[selectedConversationId] || [])
     : [];
+
+  const getRiskWarning = (riskScore?: number, riskFlags?: string[]) => {
+    const score = typeof riskScore === 'number' ? riskScore : 0;
+    if (score < RISK_FLAG_THRESHOLD) return null;
+    const flags = (riskFlags || []).slice(0, 2).join(', ');
+    return {
+      label: score >= 85 ? 'Message bloqué' : 'Message potentiellement suspect',
+      details: flags ? `Signaux: ${flags}` : undefined,
+    };
+  };
 
   // Debug: afficher les messages chargés
   useEffect(() => {
@@ -481,6 +492,7 @@ export const Messages: React.FC = () => {
             filteredConversations.map((conv) => {
               const otherUserId = conv.participants.find((id) => id !== user?.id);
               const otherUserInfo = conv.otherUser;
+              const lastRisk = conv.lastMessage?.riskScore || 0;
               
               return (
                 <button
@@ -534,6 +546,14 @@ export const Messages: React.FC = () => {
                               ? `${otherUserInfo.firstName} ${otherUserInfo.lastName || ''}`
                               : `Utilisateur ${otherUserId?.slice(0, 8) || ''}`}
                           </span>
+                          {lastRisk >= RISK_FLAG_THRESHOLD && (
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200 flex-shrink-0"
+                              title="Dernier message potentiellement suspect"
+                            >
+                              ⚠️
+                            </span>
+                          )}
                           {otherUserInfo?.isOnline !== undefined && (
                             <div className="relative flex-shrink-0">
                               {otherUserInfo.isOnline ? (
@@ -707,6 +727,7 @@ export const Messages: React.FC = () => {
                       !!message.timestamp &&
                       Date.now() - new Date(message.timestamp).getTime() <= 24 * 60 * 60 * 1000;
                     const isDeleted = message.deletedForEveryone === true;
+                    const riskWarning = getRiskWarning(message.riskScore, message.riskFlags);
                     
                     // Détecter si c'est un message de position
                     const locationMatch = message.content?.match(/📍 Ma position actuelle: https:\/\/www\.google\.com\/maps\?q=([\d.-]+),([\d.-]+)/);
@@ -720,6 +741,26 @@ export const Messages: React.FC = () => {
                         className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'}`}
                       >
                         <div className="relative group max-w-xs lg:max-w-md">
+                          {riskWarning && !isDeleted && (
+                            <div
+                              className={`mb-1 px-2 py-1 rounded-lg text-[11px] border ${
+                                isOwn
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">⚠️ {riskWarning.label}</span>
+                                <span className="text-amber-700/80">·</span>
+                                <span className="text-amber-700/80">
+                                  Ne partagez pas vos informations sensibles.
+                                </span>
+                              </div>
+                              {riskWarning.details && (
+                                <div className="text-amber-700/80 mt-0.5">{riskWarning.details}</div>
+                              )}
+                            </div>
+                          )}
                           {/* Menu ˅ en haut à droite */}
                           {isOwn && !isDeleted && (
                             <div className="absolute top-1 right-1 z-10" ref={openMessageMenuId === message.id ? messageMenuRef : undefined}>

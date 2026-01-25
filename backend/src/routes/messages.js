@@ -3,6 +3,7 @@ import { pgPool } from '../config/database.js';
 import { MessageModel } from '../models/Message.js';
 import { SubscriptionModel } from '../models/Subscription.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { analyzeMessageContent } from '../services/safetyEngine.js';
 
 const router = express.Router();
 
@@ -108,7 +109,29 @@ router.post('/send', authenticateToken, async (req, res) => {
     // Créer le message (vérifie automatiquement MongoDB)
     let message;
     try {
-      message = await MessageModel.create(senderId, receiverId, content, type || 'text', imageUrl);
+      const msgType = type || 'text';
+      const analysis =
+        msgType === 'text' || (msgType === 'image' && content)
+          ? analyzeMessageContent(content || '')
+          : { riskScore: 0, riskFlags: [], action: 'allow' };
+
+      if (analysis.action === 'block') {
+        return res.status(400).json({
+          message:
+            'Message bloqué pour votre sécurité. Évitez de partager des liens, numéros ou demandes d’argent.',
+          riskScore: analysis.riskScore,
+          riskFlags: analysis.riskFlags,
+        });
+      }
+
+      message = await MessageModel.create(
+        senderId,
+        receiverId,
+        content,
+        msgType,
+        imageUrl,
+        { riskScore: analysis.riskScore, riskFlags: analysis.riskFlags }
+      );
     } catch (error) {
       if (error.message.includes('MongoDB')) {
         return res.status(503).json({ 
