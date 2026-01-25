@@ -58,10 +58,10 @@ class SocketService {
     });
 
     // Écouter la suppression d'un message "pour tous"
-    this.socket.on('message:deleted', (data: { conversationId: string; messageId: string; deletedAt?: string }) => {
+    this.socket.on('message:deleted', (data: { conversationId: string; messageId: string; deletedBy?: string }) => {
       try {
         if (data?.conversationId && data?.messageId) {
-          useMessageStore.getState().markMessageDeleted?.(data.conversationId, data.messageId, data.deletedAt);
+          useMessageStore.getState().markMessageDeleted?.(data.conversationId, data.messageId, data.deletedBy);
         }
       } catch (e) {
         console.error('Error handling message:deleted:', e);

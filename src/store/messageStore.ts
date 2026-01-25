@@ -12,7 +12,7 @@ interface MessageState {
   setConversations: (conversations: Conversation[]) => void;
   setCurrentConversation: (conversationId: string) => void;
   addMessage: (message: Message) => void;
-  markMessageDeleted: (conversationId: string, messageId: string, deletedAt?: string) => void;
+  markMessageDeleted: (conversationId: string, messageId: string, deletedBy?: string) => void;
   markAsRead: (conversationId: string) => Promise<void>;
   updateUnreadCount: () => void;
   loadMessages: (conversationId: string) => Promise<void>;
@@ -88,42 +88,48 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  markMessageDeleted: (conversationId: string, messageId: string, deletedAt?: string) => {
+  markMessageDeleted: (conversationId: string, messageId: string, deletedBy?: string) => {
     const { messages, conversations, currentConversation } = get();
     const currentUserId = useAuthStore.getState().user?.id;
-    const nowIso = new Date().toISOString();
 
     const list = messages[conversationId] || [];
-    const target = list.find((m) => m.id === messageId);
-    if (!target) return;
+    const updatedList: Message[] = list.map((m) => {
+      if (m.id !== messageId) return m;
+      return {
+        ...m,
+        deletedForEveryone: true,
+        deletedAt: new Date().toISOString(),
+        deletedBy: deletedBy || currentUserId,
+        type: 'text' as const,
+        content: '',
+        imageUrl: undefined,
+      } as Message;
+    });
 
-    // Marquer le message comme supprimé (WhatsApp-like)
-    const updatedList = list.map((m) =>
-      m.id === messageId
-        ? {
-            ...m,
-            deletedForEveryone: true,
-            deletedAt: deletedAt || nowIso,
-            content: '',
-            type: 'text' as const,
-            imageUrl: undefined,
-          }
-        : m
-    );
-
-    const updatedMessages = { ...messages, [conversationId]: updatedList };
-
-    const isDeletedUnreadForMe =
-      currentUserId && target.receiverId === currentUserId && !target.read;
+    // Mettre à jour messages
+    const updatedMessages = {
+      ...messages,
+      [conversationId]: updatedList,
+    };
 
     const updatedConversations = conversations.map((conv) => {
       if (conv.id !== conversationId) return conv;
-      const unreadCount = isDeletedUnreadForMe ? Math.max(0, conv.unreadCount - 1) : conv.unreadCount;
-      const lastMessage =
-        conv.lastMessage?.id === messageId
-          ? { ...conv.lastMessage, deletedForEveryone: true, deletedAt: deletedAt || nowIso, content: '', type: 'text' as const, imageUrl: undefined }
-          : conv.lastMessage;
-      return { ...conv, unreadCount, lastMessage };
+      return {
+        ...conv,
+        // Garder le lastMessage (même id) mais il sera rendu comme "supprimé"
+        lastMessage:
+          conv.lastMessage?.id === messageId
+            ? {
+                ...conv.lastMessage,
+                deletedForEveryone: true,
+                deletedAt: new Date().toISOString(),
+                deletedBy: deletedBy || currentUserId,
+                type: 'text' as const,
+                content: '',
+                imageUrl: undefined,
+              } as Message
+            : conv.lastMessage,
+      };
     });
 
     const updatedCurrentConversation =
@@ -132,14 +138,27 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             ...currentConversation,
             lastMessage:
               currentConversation.lastMessage?.id === messageId
-                ? { ...currentConversation.lastMessage, deletedForEveryone: true, deletedAt: deletedAt || nowIso, content: '', type: 'text' as const, imageUrl: undefined }
+                ? {
+                    ...currentConversation.lastMessage,
+                    deletedForEveryone: true,
+                    deletedAt: new Date().toISOString(),
+                    deletedBy: deletedBy || currentUserId,
+                    type: 'text' as const,
+                    content: '',
+                    imageUrl: undefined,
+                  } as Message
                 : currentConversation.lastMessage,
           }
         : currentConversation;
 
     const totalUnread = updatedConversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
-    set({ messages: updatedMessages, conversations: updatedConversations, currentConversation: updatedCurrentConversation, unreadCount: totalUnread });
+    set({
+      messages: updatedMessages,
+      conversations: updatedConversations,
+      currentConversation: updatedCurrentConversation,
+      unreadCount: totalUnread,
+    });
   },
 
   markAsRead: async (conversationId: string) => {
