@@ -39,12 +39,30 @@ export interface User {
     incognito: boolean;
     sharePhone: 'afterMatch' | 'afterXMessages' | 'never' | string;
   };
+  boostedUntil?: string | null;
+  travelMode?: {
+    enabled: boolean;
+    location?: {
+      country?: string | null;
+      region?: string | null;
+      city?: string | null;
+      commune?: string | null;
+      quartier?: string | null;
+      coordinates?: { lat: number; lng: number };
+    };
+  };
   createdAt: string;
   lastActive: string;
   stats?: {
     likes: number;
     dislikes: number;
   };
+}
+
+export interface LikeReceived {
+  user: User;
+  action: 'like' | 'superlike';
+  createdAt: string;
 }
 
 // Types pour les abonnements
