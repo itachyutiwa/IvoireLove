@@ -7,6 +7,7 @@ import { pgPool } from '../config/database.js';
 import { UserModel } from '../models/User.js';
 import { SwipeModel } from '../models/Swipe.js';
 import { MatchModel } from '../models/Match.js';
+import { BlockModel } from '../models/Block.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -123,7 +124,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
     const updates = {};
-    const allowedFields = ['firstName', 'lastName', 'bio', 'dateOfBirth', 'location', 'preferences', 'phone'];
+    const allowedFields = ['firstName', 'lastName', 'bio', 'dateOfBirth', 'location', 'preferences', 'phone', 'privacy'];
 
     Object.keys(req.body).forEach((key) => {
       if (allowedFields.includes(key)) {
@@ -308,7 +309,10 @@ router.get('/discoveries', authenticateToken, async (req, res) => {
     const discoveries = await UserModel.getDiscoveries(pgPool, userId, filters);
 
     // Filtrer les utilisateurs déjà swipés
-    const filteredDiscoveries = discoveries.filter((user) => !swipedIds.includes(user.id));
+    const excludedUserIds = new Set(await BlockModel.getExcludedUserIds(pgPool, userId));
+    const filteredDiscoveries = discoveries.filter(
+      (user) => !swipedIds.includes(user.id) && !excludedUserIds.has(user.id)
+    );
 
     res.json(filteredDiscoveries.slice(0, 20)); // Limiter à 20 résultats
   } catch (error) {
@@ -327,10 +331,14 @@ router.post('/online-status', authenticateToken, async (req, res) => {
     );
     const io = req.app.get('io');
     if (io) {
-      io.emit(isOnline === true ? 'user:online' : 'user:offline', {
-        userId: req.user.userId,
-        lastActive: new Date().toISOString(),
-      });
+      const privacy = await pgPool.query('SELECT privacy_hide_online FROM users WHERE id = $1', [req.user.userId]);
+      const hideOnline = privacy.rows[0]?.privacy_hide_online === true;
+      if (!hideOnline) {
+        io.emit(isOnline === true ? 'user:online' : 'user:offline', {
+          userId: req.user.userId,
+          lastActive: new Date().toISOString(),
+        });
+      }
     }
     res.json({ message: 'Statut mis à jour' });
   } catch (error) {
@@ -351,6 +359,12 @@ router.post('/swipe', authenticateToken, async (req, res) => {
 
     if (userId === targetUserId) {
       return res.status(400).json({ message: 'Vous ne pouvez pas swiper votre propre profil' });
+    }
+
+    // Empêcher les swipes sur un utilisateur bloqué (dans un sens ou dans l'autre)
+    const blocked = await BlockModel.isBlockedEitherWay(pgPool, userId, targetUserId);
+    if (blocked) {
+      return res.status(403).json({ message: 'Action impossible (utilisateur bloqué)' });
     }
 
     // Enregistrer le swipe
@@ -408,7 +422,8 @@ router.get('/all', authenticateToken, async (req, res) => {
     // Obtenir tous les utilisateurs (sans filtrer les swipes)
     const allUsers = await UserModel.getDiscoveries(pgPool, userId, filters);
 
-    res.json(allUsers);
+    const excludedUserIds = new Set(await BlockModel.getExcludedUserIds(pgPool, userId));
+    res.json(allUsers.filter((u) => !excludedUserIds.has(u.id)));
   } catch (error) {
     console.error('Get all users error:', error);
     res.status(500).json({ message: 'Erreur lors de la récupération des utilisateurs' });
@@ -418,18 +433,22 @@ router.get('/all', authenticateToken, async (req, res) => {
 // Obtenir les matchs
 router.get('/matches', authenticateToken, async (req, res) => {
   try {
+    const currentUserId = req.user.userId;
     const matches = await MatchModel.findByUserId(pgPool, req.user.userId);
+    const excludedUserIds = new Set(await BlockModel.getExcludedUserIds(pgPool, currentUserId));
     
     // Récupérer les informations des utilisateurs matchés avec le numéro de téléphone
     const matchUsers = await Promise.all(
       matches.map(async (match) => {
-        const otherUserId = match.users.find((id) => id !== req.user.userId);
+        const otherUserId = match.users.find((id) => id !== currentUserId);
+        if (!otherUserId || excludedUserIds.has(otherUserId)) return null;
         const user = await UserModel.findById(pgPool, otherUserId);
         if (!user) return null;
         
-        // Récupérer le numéro de téléphone depuis la base
-        const userRow = await pgPool.query('SELECT phone FROM users WHERE id = $1', [otherUserId]);
-        const phone = userRow.rows[0]?.phone || null;
+        // Récupérer le numéro de téléphone selon préférence privacy du matché
+        const userRow = await pgPool.query('SELECT phone, privacy_share_phone FROM users WHERE id = $1', [otherUserId]);
+        const sharePhone = userRow.rows[0]?.privacy_share_phone || 'afterMatch';
+        const phone = sharePhone === 'never' ? null : (userRow.rows[0]?.phone || null);
         
         return {
           ...user,

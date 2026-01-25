@@ -4,18 +4,26 @@ import { MessageModel } from '../models/Message.js';
 import { SubscriptionModel } from '../models/Subscription.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { analyzeMessageContent } from '../services/safetyEngine.js';
+import { BlockModel } from '../models/Block.js';
 
 const router = express.Router();
 
 // Obtenir les conversations
 router.get('/conversations', authenticateToken, async (req, res) => {
   try {
-    const conversations = await MessageModel.getConversations(req.user.userId);
+    const userId = req.user.userId;
+    const excludedUserIds = new Set(await BlockModel.getExcludedUserIds(pgPool, userId));
+
+    const conversations = (await MessageModel.getConversations(userId)).filter((conv) => {
+      const otherUserId = conv.participants?.find((id) => id !== userId);
+      if (!otherUserId) return true;
+      return !excludedUserIds.has(otherUserId);
+    });
     
     // Enrichir les conversations avec les informations des utilisateurs
     const enrichedConversations = await Promise.all(
       conversations.map(async (conv) => {
-        const otherUserId = conv.participants.find((id) => id !== req.user.userId);
+        const otherUserId = conv.participants.find((id) => id !== userId);
         if (!otherUserId) {
           return conv;
         }
@@ -23,7 +31,7 @@ router.get('/conversations', authenticateToken, async (req, res) => {
         try {
           // Récupérer les informations de l'autre utilisateur depuis PostgreSQL (incluant les photos)
           const user = await pgPool.query(
-            'SELECT id, first_name, last_name, date_of_birth, photos, is_online, last_active FROM users WHERE id = $1',
+            'SELECT id, first_name, last_name, date_of_birth, photos, is_online, last_active, privacy_hide_online, privacy_hide_last_active FROM users WHERE id = $1',
             [otherUserId]
           );
           
@@ -46,8 +54,13 @@ router.get('/conversations', authenticateToken, async (req, res) => {
                 lastName: userData.last_name,
                 age,
                 photos: userData.photos || [],
-                isOnline: userData.is_online === true,
-                lastActive: userData.last_active ? new Date(userData.last_active).toISOString() : undefined,
+                isOnline: userData.privacy_hide_online === true ? undefined : userData.is_online === true,
+                lastActive:
+                  userData.privacy_hide_last_active === true
+                    ? undefined
+                    : userData.last_active
+                      ? new Date(userData.last_active).toISOString()
+                      : undefined,
               },
             };
           }
@@ -73,6 +86,15 @@ router.get('/conversations', authenticateToken, async (req, res) => {
 router.get('/conversations/:conversationId', authenticateToken, async (req, res) => {
   try {
     const { conversationId } = req.params;
+    const userId = req.user.userId;
+    const participants = (conversationId || '').split('_').filter(Boolean);
+    const otherUserId = participants.find((id) => id !== userId);
+    if (otherUserId) {
+      const blocked = await BlockModel.isBlockedEitherWay(pgPool, userId, otherUserId);
+      if (blocked) {
+        return res.status(403).json({ message: 'Conversation indisponible (utilisateur bloqué)' });
+      }
+    }
     const messages = await MessageModel.getMessages(conversationId);
     res.json(messages);
   } catch (error) {
@@ -104,6 +126,12 @@ router.post('/send', authenticateToken, async (req, res) => {
           remaining: limit.remaining,
         });
       }
+    }
+
+    // Blocage: empêcher l'envoi si l'un a bloqué l'autre
+    const blocked = await BlockModel.isBlockedEitherWay(pgPool, senderId, receiverId);
+    if (blocked) {
+      return res.status(403).json({ message: 'Impossible d’envoyer un message (utilisateur bloqué)' });
     }
 
     // Créer le message (vérifie automatiquement MongoDB)

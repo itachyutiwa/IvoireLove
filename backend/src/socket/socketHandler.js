@@ -3,6 +3,7 @@ import { MessageModel } from '../models/Message.js';
 import { SubscriptionModel } from '../models/Subscription.js';
 import { pgPool } from '../config/database.js';
 import { analyzeMessageContent } from '../services/safetyEngine.js';
+import { BlockModel } from '../models/Block.js';
 
 export const setupSocket = (io) => {
   // Middleware d'authentification Socket.io
@@ -35,8 +36,12 @@ export const setupSocket = (io) => {
         'UPDATE users SET is_online = TRUE, last_active = CURRENT_TIMESTAMP WHERE id = $1',
         [socket.userId]
       );
-      // Notifier les autres utilisateurs que cet utilisateur est en ligne
-      io.emit('user:online', { userId: socket.userId, lastActive: new Date().toISOString() });
+      // Notifier les autres utilisateurs si l'utilisateur n'a pas masqué sa présence
+      const privacy = await pgPool.query('SELECT privacy_hide_online FROM users WHERE id = $1', [socket.userId]);
+      const hideOnline = privacy.rows[0]?.privacy_hide_online === true;
+      if (!hideOnline) {
+        io.emit('user:online', { userId: socket.userId, lastActive: new Date().toISOString() });
+      }
     } catch (error) {
       console.error('Error updating online status:', error);
     }
@@ -69,6 +74,13 @@ export const setupSocket = (io) => {
             });
             return;
           }
+        }
+
+        // Blocage: empêcher l'envoi si l'un a bloqué l'autre
+        const blocked = await BlockModel.isBlockedEitherWay(pgPool, socket.userId, receiverId);
+        if (blocked) {
+          socket.emit('message:error', { message: 'Impossible d’envoyer un message (utilisateur bloqué)' });
+          return;
         }
 
         // Créer le message
@@ -137,8 +149,12 @@ export const setupSocket = (io) => {
           'UPDATE users SET is_online = FALSE, last_active = CURRENT_TIMESTAMP WHERE id = $1',
           [socket.userId]
         );
-        // Notifier les autres utilisateurs que cet utilisateur est hors ligne
-        io.emit('user:offline', { userId: socket.userId, lastActive: new Date().toISOString() });
+        // Notifier les autres utilisateurs si l'utilisateur n'a pas masqué sa présence
+        const privacy = await pgPool.query('SELECT privacy_hide_online FROM users WHERE id = $1', [socket.userId]);
+        const hideOnline = privacy.rows[0]?.privacy_hide_online === true;
+        if (!hideOnline) {
+          io.emit('user:offline', { userId: socket.userId, lastActive: new Date().toISOString() });
+        }
       } catch (error) {
         console.error('Error updating offline status:', error);
       }
