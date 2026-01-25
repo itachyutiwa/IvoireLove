@@ -57,6 +57,17 @@ class SocketService {
       }
     });
 
+    // Écouter la suppression d'un message "pour tous"
+    this.socket.on('message:deleted', (data: { conversationId: string; messageId: string; deletedAt?: string }) => {
+      try {
+        if (data?.conversationId && data?.messageId) {
+          useMessageStore.getState().markMessageDeleted?.(data.conversationId, data.messageId, data.deletedAt);
+        }
+      } catch (e) {
+        console.error('Error handling message:deleted:', e);
+      }
+    });
+
     // Écouter les nouveaux matchs
     this.socket.on('match:new', (data: { matchId: string; userId: string }) => {
       // Gérer la notification de match

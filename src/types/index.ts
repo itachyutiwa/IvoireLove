@@ -2,7 +2,6 @@
 export interface User {
   id: string;
   email: string;
-  phone?: string;
   firstName: string;
   lastName: string;
   dateOfBirth: string;
@@ -75,6 +74,8 @@ export interface Message {
   timestamp: string;
   read: boolean;
   readAt?: string;
+  deletedForEveryone?: boolean;
+  deletedAt?: string;
 }
 
 export interface Conversation {
