@@ -7,6 +7,7 @@ interface AuthState {
   user: User | null;
   token: string | null;
   subscription: Subscription | null;
+  presenceMode: 'online' | 'offline';
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -15,6 +16,7 @@ interface AuthState {
   logout: () => void;
   updateUser: (user: User) => void;
   updateSubscription: (subscription: Subscription) => void;
+  setPresenceMode: (mode: 'online' | 'offline') => void;
   checkAuth: () => Promise<void>;
 }
 
@@ -24,6 +26,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       token: null,
       subscription: null,
+      presenceMode: 'online',
       isAuthenticated: false,
       isLoading: true,
 
@@ -88,6 +91,10 @@ export const useAuthStore = create<AuthState>()(
         set({ subscription });
       },
 
+      setPresenceMode: (mode: 'online' | 'offline') => {
+        set({ presenceMode: mode });
+      },
+
       checkAuth: async () => {
         const token = get().token;
         if (!token) {
@@ -122,6 +129,7 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         subscription: state.subscription,
         isAuthenticated: state.isAuthenticated,
+        presenceMode: state.presenceMode,
       }),
     }
   )

@@ -35,7 +35,7 @@ export const setupSocket = (io) => {
         [socket.userId]
       );
       // Notifier les autres utilisateurs que cet utilisateur est en ligne
-      io.emit('user:online', { userId: socket.userId });
+      io.emit('user:online', { userId: socket.userId, lastActive: new Date().toISOString() });
     } catch (error) {
       console.error('Error updating online status:', error);
     }
@@ -120,7 +120,7 @@ export const setupSocket = (io) => {
           [socket.userId]
         );
         // Notifier les autres utilisateurs que cet utilisateur est hors ligne
-        io.emit('user:offline', { userId: socket.userId });
+        io.emit('user:offline', { userId: socket.userId, lastActive: new Date().toISOString() });
       } catch (error) {
         console.error('Error updating offline status:', error);
       }

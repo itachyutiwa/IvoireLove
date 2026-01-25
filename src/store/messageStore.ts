@@ -15,6 +15,7 @@ interface MessageState {
   markAsRead: (conversationId: string) => Promise<void>;
   updateUnreadCount: () => void;
   loadMessages: (conversationId: string) => Promise<void>;
+  updateUserPresence: (userId: string, isOnline: boolean, lastActive?: string) => void;
 }
 
 export const useMessageStore = create<MessageState>((set, get) => ({
@@ -186,6 +187,37 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       set({ isLoading: false });
       throw error;
     }
+  },
+
+  updateUserPresence: (userId: string, isOnline: boolean, lastActive?: string) => {
+    const { conversations, currentConversation } = get();
+    const nowIso = new Date().toISOString();
+
+    const updatedConversations = conversations.map((conv) => {
+      if (!conv.otherUser || conv.otherUser.id !== userId) return conv;
+      return {
+        ...conv,
+        otherUser: {
+          ...conv.otherUser,
+          isOnline,
+          lastActive: lastActive || nowIso,
+        },
+      };
+    });
+
+    const updatedCurrentConversation =
+      currentConversation?.otherUser?.id === userId
+        ? {
+            ...currentConversation,
+            otherUser: {
+              ...currentConversation.otherUser,
+              isOnline,
+              lastActive: lastActive || nowIso,
+            },
+          }
+        : currentConversation;
+
+    set({ conversations: updatedConversations, currentConversation: updatedCurrentConversation });
   },
 }));
 

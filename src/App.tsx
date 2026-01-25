@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
@@ -22,14 +22,14 @@ import { Subscription } from '@/pages/Subscription';
 import '@/styles/index.css';
 
 function App() {
-  const { isAuthenticated, checkAuth, isLoading } = useAuthStore();
+  const { isAuthenticated, checkAuth, isLoading, presenceMode } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
 
   useEffect(() => {
-    if (isAuthenticated && !isLoading) {
+    if (isAuthenticated && !isLoading && presenceMode !== 'offline') {
       socketService.connect();
     } else {
       socketService.disconnect();
@@ -37,7 +37,7 @@ function App() {
     return () => {
       socketService.disconnect();
     };
-  }, [isAuthenticated, isLoading]);
+  }, [isAuthenticated, isLoading, presenceMode]);
 
   return (
     <BrowserRouter>

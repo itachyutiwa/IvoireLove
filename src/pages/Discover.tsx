@@ -53,14 +53,18 @@ export const Discover: React.FC = () => {
     }
   };
 
-  // Mettre à jour le statut en ligne
+  // Mettre à jour le statut en ligne (uniquement si présence activée)
   useEffect(() => {
     if (user) {
+      const presenceMode = useAuthStore.getState().presenceMode;
+      if (presenceMode === 'offline') return;
       // Marquer comme en ligne au chargement
       userService.updateOnlineStatus(true);
       
       // Mettre à jour le statut toutes les 30 secondes
       const interval = setInterval(() => {
+        const mode = useAuthStore.getState().presenceMode;
+        if (mode === 'offline') return;
         userService.updateOnlineStatus(true);
       }, 30000);
 
@@ -73,7 +77,10 @@ export const Discover: React.FC = () => {
       return () => {
         clearInterval(interval);
         window.removeEventListener('beforeunload', handleBeforeUnload);
-        userService.updateOnlineStatus(false);
+        const mode = useAuthStore.getState().presenceMode;
+        if (mode !== 'offline') {
+          userService.updateOnlineStatus(false);
+        }
       };
     }
   }, [user]);

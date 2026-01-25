@@ -54,6 +54,9 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Rendre socket.io accessible aux routes (req.app.get('io'))
+app.set('io', io);
+
 // Servir les fichiers uploadés
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Servir aussi les photos de messages
