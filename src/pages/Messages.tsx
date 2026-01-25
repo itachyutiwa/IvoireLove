@@ -10,7 +10,7 @@ import { MessagingMenu } from '@/components/contact/MessagingMenu';
 import { Modal } from '@/components/ui/Modal';
 import { formatRelativeTime } from '@/utils/helpers';
 import { User } from '@/types';
-import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation } from 'react-icons/io5';
+import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd } from 'react-icons/io5';
 import { LocationMessage } from '@/components/chat/LocationMessage';
 import toast from 'react-hot-toast';
 
@@ -46,6 +46,8 @@ export const Messages: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [otherUser, setOtherUser] = useState<User | null>(null);
   const [showMessagingMenu, setShowMessagingMenu] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -63,6 +65,17 @@ export const Messages: React.FC = () => {
     return () => {
       socketService.disconnect();
     };
+  }, []);
+
+  // Fermer le menu "+" si clic à l'extérieur
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(event.target as Node)) {
+        setShowAttachMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Marquer comme lu immédiatement quand une conversation est sélectionnée
@@ -334,6 +347,51 @@ export const Messages: React.FC = () => {
     }
   };
 
+  const handleShareLocation = async () => {
+    if (!selectedConversationId || !user) return;
+
+    const conversation = conversations.find((c) => c.id === selectedConversationId);
+    if (!conversation) return;
+
+    const receiverId = conversation.participants.find((id) => id !== user.id);
+    if (!receiverId) return;
+
+    try {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const locationUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+            const locationText = `📍 Ma position actuelle: ${locationUrl}`;
+
+            try {
+              const sentMessage = await messageService.sendMessage(receiverId, locationText);
+              if (sentMessage && selectedConversationId) {
+                const { addMessage } = useMessageStore.getState();
+                if (!sentMessage.conversationId && selectedConversationId) {
+                  sentMessage.conversationId = selectedConversationId;
+                }
+                addMessage(sentMessage);
+                setTimeout(() => scrollToBottom(), 100);
+              }
+              toast.success('Position partagée');
+            } catch (_err: any) {
+              toast.error('Erreur lors du partage de la position');
+            }
+          },
+          (_error) => {
+            toast.error('Impossible d\'obtenir votre position');
+          }
+        );
+      } else {
+        toast.error('La géolocalisation n\'est pas disponible');
+      }
+    } catch (_error) {
+      toast.error('Erreur lors du partage de la position');
+    }
+  };
+
   if (error) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -513,6 +571,11 @@ export const Messages: React.FC = () => {
                       const conversation = conversations.find((c) => c.id === selectedConversationId);
                       const otherUserInfo = conversation?.otherUser;
                       if (otherUserInfo && otherUserInfo.firstName) {
+                        const statusText = otherUserInfo.isOnline
+                          ? 'En ligne'
+                          : otherUserInfo.lastActive
+                            ? `En ligne ${formatRelativeTime(otherUserInfo.lastActive)}`
+                            : 'Hors ligne';
                         return (
                           <>
                             {otherUserInfo.photos && otherUserInfo.photos.length > 0 ? (
@@ -544,11 +607,9 @@ export const Messages: React.FC = () => {
                                 <h2 className="text-lg font-semibold text-gray-900">
                                   {`${otherUserInfo.firstName} ${otherUserInfo.lastName || ''}`}
                                 </h2>
-                                {otherUserInfo.age && (
-                                  <p className="text-sm text-gray-500">
-                                    {otherUserInfo.age} ans
-                                  </p>
-                                )}
+                                <p className={`text-sm ${otherUserInfo.isOnline ? 'text-green-600 font-medium' : 'text-gray-500'}`}>
+                                  {statusText}
+                                </p>
                               </div>
                               {otherUserInfo.isOnline !== undefined && (
                                 <div className="relative">
@@ -764,68 +825,56 @@ export const Messages: React.FC = () => {
                   onChange={handleImageSelect}
                   className="hidden"
                 />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadingImage}
-                  className="p-3 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-                  title="Ajouter une photo"
-                >
-                  {uploadingImage ? (
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-600"></div>
-                  ) : (
-                    <IoImage size={20} />
-                  )}
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!selectedConversationId || !user) return;
-                    
-                    const conversation = conversations.find((c) => c.id === selectedConversationId);
-                    if (!conversation) return;
-                    
-                    const receiverId = conversation.participants.find((id) => id !== user.id);
-                    if (!receiverId) return;
+                {/* Menu d'actions (+) comme WhatsApp */}
+                <div className="relative" ref={attachMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowAttachMenu((v) => !v)}
+                    className="p-3 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Plus d'options"
+                  >
+                    <IoAdd size={22} />
+                  </button>
 
-                    try {
-                      if (navigator.geolocation) {
-                        navigator.geolocation.getCurrentPosition(
-                          async (position) => {
-                            const lat = position.coords.latitude;
-                            const lng = position.coords.longitude;
-                            const locationUrl = `https://www.google.com/maps?q=${lat},${lng}`;
-                            const locationText = `📍 Ma position actuelle: ${locationUrl}`;
-                            
-                            try {
-                              const sentMessage = await messageService.sendMessage(receiverId, locationText);
-                              if (sentMessage && selectedConversationId) {
-                                const { addMessage } = useMessageStore.getState();
-                                if (!sentMessage.conversationId && selectedConversationId) {
-                                  sentMessage.conversationId = selectedConversationId;
-                                }
-                                addMessage(sentMessage);
-                                setTimeout(() => scrollToBottom(), 100);
-                              }
-                              toast.success('Position partagée');
-                            } catch (error: any) {
-                              toast.error('Erreur lors du partage de la position');
-                            }
-                          },
-                          (error) => {
-                            toast.error('Impossible d\'obtenir votre position');
-                          }
-                        );
-                      } else {
-                        toast.error('La géolocalisation n\'est pas disponible');
-                      }
-                    } catch (error) {
-                      toast.error('Erreur lors du partage de la position');
-                    }
-                  }}
-                  className="p-3 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Partager ma position"
-                >
-                  <IoLocation size={20} />
-                </button>
+                  {showAttachMenu && (
+                    <div className="absolute bottom-full left-0 mb-2 w-56 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-50">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAttachMenu(false);
+                          fileInputRef.current?.click();
+                        }}
+                        disabled={uploadingImage}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {uploadingImage ? (
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-600"></div>
+                        ) : (
+                          <IoImage size={20} className="text-gray-700" />
+                        )}
+                        <div className="text-left">
+                          <p className="text-sm font-semibold text-gray-900">Photo</p>
+                          <p className="text-xs text-gray-500">Envoyer une image</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAttachMenu(false);
+                          handleShareLocation();
+                        }}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors border-t border-gray-100"
+                      >
+                        <IoLocation size={20} className="text-gray-700" />
+                        <div className="text-left">
+                          <p className="text-sm font-semibold text-gray-900">Position</p>
+                          <p className="text-xs text-gray-500">Partager votre localisation</p>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={messageText}

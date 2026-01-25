@@ -89,6 +89,8 @@ export interface Conversation {
     lastName: string;
     age: number;
     photos?: string[];
+    isOnline?: boolean;
+    lastActive?: string;
   };
 }
 

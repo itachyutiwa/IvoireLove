@@ -218,6 +218,13 @@ router.post('/online-status', authenticateToken, async (req, res) => {
       'UPDATE users SET is_online = $1, last_active = CURRENT_TIMESTAMP WHERE id = $2',
       [isOnline === true, req.user.userId]
     );
+    const io = req.app.get('io');
+    if (io) {
+      io.emit(isOnline === true ? 'user:online' : 'user:offline', {
+        userId: req.user.userId,
+        lastActive: new Date().toISOString(),
+      });
+    }
     res.json({ message: 'Statut mis à jour' });
   } catch (error) {
     console.error('Update online status error:', error);

@@ -5,15 +5,18 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { useNavigationCounts } from '@/hooks/useNavigationCounts';
 import { Button } from '@/components/ui/Button';
 import { IoChatbubbles, IoPerson, IoHeart, IoLogOut, IoFilter, IoSettings, IoChevronDown } from 'react-icons/io5';
+import { userService } from '@/services/userService';
+import { socketService } from '@/services/socketService';
 
 export const Header: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
+  const { user, logout, updateUser, presenceMode, setPresenceMode } = useAuthStore();
   const { subscription, isTrial, timeRemaining } = useSubscription();
   const { newProfilesCount, matchesCount, unreadMessagesCount } = useNavigationCounts();
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [isUpdatingPresence, setIsUpdatingPresence] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -33,6 +36,29 @@ export const Header: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  const handlePresenceChange = async (mode: 'online' | 'offline') => {
+    if (!user) return;
+    setIsUpdatingPresence(true);
+    try {
+      await userService.updateOnlineStatus(mode === 'online');
+      setPresenceMode(mode);
+      updateUser({
+        ...user,
+        isOnline: mode === 'online',
+        lastActive: new Date().toISOString(),
+      });
+      if (mode === 'online') {
+        socketService.connect();
+      } else {
+        socketService.disconnect();
+      }
+    } catch (e) {
+      // Ne pas bloquer l'UI si l'API échoue
+    } finally {
+      setIsUpdatingPresence(false);
+    }
+  };
 
   return (
     <header className="bg-gradient-to-r from-white via-primary-50 to-secondary-50 border-b-2 border-primary-200 sticky top-0 z-30 shadow-sm">
@@ -170,6 +196,41 @@ export const Header: React.FC = () => {
                       <IoSettings size={20} />
                       <span className="font-medium">Paramètres</span>
                     </Link>
+
+                    {/* Présence en ligne */}
+                    <div className="border-t border-gray-200 px-4 py-3">
+                      <p className="text-xs font-semibold text-gray-500 mb-2">Présence</p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handlePresenceChange('online')}
+                          disabled={isUpdatingPresence}
+                          className={`flex-1 inline-flex items-center justify-center gap-2 px-2 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                            presenceMode === 'online'
+                              ? 'bg-green-50 border-green-400 text-green-700'
+                              : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                          } ${isUpdatingPresence ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          title="Apparaître en ligne"
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                          En ligne
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePresenceChange('offline')}
+                          disabled={isUpdatingPresence}
+                          className={`flex-1 inline-flex items-center justify-center gap-2 px-2 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                            presenceMode === 'offline'
+                              ? 'bg-red-50 border-red-400 text-red-700'
+                              : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                          } ${isUpdatingPresence ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          title="Apparaître hors ligne"
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                          Hors ligne
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

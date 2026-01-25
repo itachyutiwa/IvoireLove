@@ -12,7 +12,8 @@ class SocketService {
   }
 
   connect(): void {
-    const token = useAuthStore.getState().token;
+    const { token, presenceMode } = useAuthStore.getState();
+    if (presenceMode === 'offline') return;
     if (!token || this.isConnected) return;
 
     this.socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:8000', {
@@ -63,14 +64,14 @@ class SocketService {
     });
 
     // Écouter les changements de statut en ligne
-    this.socket.on('user:online', (data: { userId: string }) => {
+    this.socket.on('user:online', (data: { userId: string; lastActive?: string }) => {
       console.log('User online:', data.userId);
-      // Mettre à jour le statut en ligne dans le store si nécessaire
+      useMessageStore.getState().updateUserPresence?.(data.userId, true, data.lastActive);
     });
 
-    this.socket.on('user:offline', (data: { userId: string }) => {
+    this.socket.on('user:offline', (data: { userId: string; lastActive?: string }) => {
       console.log('User offline:', data.userId);
-      // Mettre à jour le statut hors ligne dans le store si nécessaire
+      useMessageStore.getState().updateUserPresence?.(data.userId, false, data.lastActive);
     });
   }
 

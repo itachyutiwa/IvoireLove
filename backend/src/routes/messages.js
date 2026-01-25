@@ -22,7 +22,7 @@ router.get('/conversations', authenticateToken, async (req, res) => {
         try {
           // Récupérer les informations de l'autre utilisateur depuis PostgreSQL (incluant les photos)
           const user = await pgPool.query(
-            'SELECT id, first_name, last_name, date_of_birth, photos FROM users WHERE id = $1',
+            'SELECT id, first_name, last_name, date_of_birth, photos, is_online, last_active FROM users WHERE id = $1',
             [otherUserId]
           );
           
@@ -45,6 +45,8 @@ router.get('/conversations', authenticateToken, async (req, res) => {
                 lastName: userData.last_name,
                 age,
                 photos: userData.photos || [],
+                isOnline: userData.is_online === true,
+                lastActive: userData.last_active ? new Date(userData.last_active).toISOString() : undefined,
               },
             };
           }
