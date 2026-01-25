@@ -32,7 +32,7 @@ const voiceStorage = multer.diskStorage({
 const voiceUpload = multer({
   storage: voiceStorage,
   limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB
+    fileSize: parseInt(process.env.MAX_VOICE_FILE_SIZE) || parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /mp3|wav|m4a|aac|ogg|webm/;
@@ -43,15 +43,19 @@ const voiceUpload = multer({
   },
 });
 
-router.post('/voice', authenticateToken, voiceUpload.single('voice'), async (req, res) => {
-  try {
+router.post('/voice', authenticateToken, (req, res) => {
+  voiceUpload.single('voice')(req, res, (err) => {
+    if (err) {
+      const code = err.code || err.name;
+      if (code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ message: 'Audio trop lourd (max 5MB)' });
+      }
+      return res.status(400).json({ message: err.message || 'Upload audio impossible' });
+    }
     if (!req.file) return res.status(400).json({ message: 'Aucun fichier fourni' });
     const url = `/uploads/voice/${req.file.filename}`;
-    res.json({ url });
-  } catch (error) {
-    console.error('Upload voice error:', error);
-    res.status(500).json({ message: 'Erreur lors de l’upload du message vocal' });
-  }
+    return res.json({ url });
+  });
 });
 
 // Upload video messages (MVP)
@@ -74,26 +78,34 @@ const videoStorage = multer.diskStorage({
 const videoUpload = multer({
   storage: videoStorage,
   limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB
+    // La vidéo dépasse souvent 5MB : valeur par défaut 25MB
+    fileSize: parseInt(process.env.MAX_VIDEO_FILE_SIZE) || 26214400,
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /mp4|mov|webm|mkv/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetypeOk = file.mimetype?.startsWith('video/');
-    if (extname && mimetypeOk) cb(null, true);
+    // Certains navigateurs renvoient parfois un mimetype imprécis (ex: application/octet-stream)
+    // On accepte si l'extension OU le mimetype ressemble à une vidéo.
+    const allowedExt = /\.(mp4|mov|webm|mkv|m4v|3gp)$/i;
+    const extOk = allowedExt.test(path.extname(file.originalname).toLowerCase());
+    const mime = (file.mimetype || '').toLowerCase();
+    const mimeOk = mime.startsWith('video/') || mime === 'application/octet-stream';
+    if (extOk || mimeOk) cb(null, true);
     else cb(new Error('Seuls les fichiers vidéo sont autorisés'));
   },
 });
 
-router.post('/video', authenticateToken, videoUpload.single('video'), async (req, res) => {
-  try {
+router.post('/video', authenticateToken, (req, res) => {
+  videoUpload.single('video')(req, res, (err) => {
+    if (err) {
+      const code = err.code || err.name;
+      if (code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ message: 'Vidéo trop lourde (max 25MB)' });
+      }
+      return res.status(400).json({ message: err.message || 'Upload vidéo impossible' });
+    }
     if (!req.file) return res.status(400).json({ message: 'Aucun fichier fourni' });
     const url = `/uploads/video/${req.file.filename}`;
-    res.json({ url });
-  } catch (error) {
-    console.error('Upload video error:', error);
-    res.status(500).json({ message: 'Erreur lors de l’upload de la vidéo' });
-  }
+    return res.json({ url });
+  });
 });
 
 // Obtenir les conversations
