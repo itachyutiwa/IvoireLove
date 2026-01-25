@@ -17,6 +17,7 @@ interface MessageState {
   updateUnreadCount: () => void;
   loadMessages: (conversationId: string) => Promise<void>;
   updateUserPresence: (userId: string, isOnline: boolean, lastActive?: string) => void;
+  updateMessageReactions: (conversationId: string, messageId: string, reactions: Record<string, string[]>) => void;
 }
 
 export const useMessageStore = create<MessageState>((set, get) => ({
@@ -292,6 +293,35 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         : currentConversation;
 
     set({ conversations: updatedConversations, currentConversation: updatedCurrentConversation });
+  },
+
+  updateMessageReactions: (conversationId: string, messageId: string, reactions: Record<string, string[]>) => {
+    const { messages, conversations, currentConversation } = get();
+    const list = messages[conversationId] || [];
+
+    const updatedList = list.map((m) => (m.id === messageId ? { ...m, reactions } : m));
+    const updatedMessages = { ...messages, [conversationId]: updatedList };
+
+    const updatedConversations = conversations.map((conv) => {
+      if (conv.id !== conversationId) return conv;
+      return {
+        ...conv,
+        lastMessage: conv.lastMessage?.id === messageId ? { ...conv.lastMessage, reactions } : conv.lastMessage,
+      };
+    });
+
+    const updatedCurrentConversation =
+      currentConversation?.id === conversationId
+        ? {
+            ...currentConversation,
+            lastMessage:
+              currentConversation.lastMessage?.id === messageId
+                ? { ...currentConversation.lastMessage, reactions }
+                : currentConversation.lastMessage,
+          }
+        : currentConversation;
+
+    set({ messages: updatedMessages, conversations: updatedConversations, currentConversation: updatedCurrentConversation });
   },
 }));
 

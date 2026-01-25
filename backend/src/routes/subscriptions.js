@@ -2,6 +2,7 @@ import express from 'express';
 import { pgPool } from '../config/database.js';
 import { SubscriptionModel } from '../models/Subscription.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { UserModel } from '../models/User.js';
 
 const router = express.Router();
 
@@ -241,6 +242,31 @@ router.get('/likes-received', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Likes received error:', error);
     res.status(500).json({ message: 'Erreur lors de la récupération des likes' });
+  }
+});
+
+// Mode voyage (Premium) - mettre à jour une localisation alternative
+router.post('/travel-mode', authenticateToken, async (req, res) => {
+  try {
+    const subscription = await SubscriptionModel.findByUserId(pgPool, req.user.userId);
+    if (!subscription || subscription.isActive !== true) {
+      return res.status(403).json({ message: 'Abonnement requis' });
+    }
+
+    const entitlements = getEntitlements(subscription.type);
+    if (!entitlements.canTravelMode) {
+      return res.status(403).json({ message: 'Mode voyage réservé aux abonnements Premium' });
+    }
+
+    const { enabled, location } = req.body || {};
+    const updatedUser = await UserModel.update(pgPool, req.user.userId, {
+      travelMode: { enabled: enabled === true, location: location || {} },
+    });
+
+    res.json(updatedUser);
+  } catch (error) {
+    console.error('Travel mode error:', error);
+    res.status(500).json({ message: 'Erreur lors de la mise à jour du mode voyage' });
   }
 });
 

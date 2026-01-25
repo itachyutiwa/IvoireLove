@@ -3,9 +3,15 @@ import { useAuthStore } from '@/store/authStore';
 import { IoSettings } from 'react-icons/io5';
 import { userService } from '@/services/userService';
 import toast from 'react-hot-toast';
+import { useSubscription } from '@/hooks/useSubscription';
+import { getEntitlements } from '@/utils/entitlements';
+import { subscriptionService } from '@/services/subscriptionService';
+import { supportService } from '@/services/supportService';
+import { SupportTicket } from '@/types';
 
 export const Settings: React.FC = () => {
   const { user, updateUser } = useAuthStore();
+  const { subscription } = useSubscription();
   const [privacy, setPrivacy] = useState({
     hideLastActive: user?.privacy?.hideLastActive === true,
     hideOnline: user?.privacy?.hideOnline === true,
@@ -13,6 +19,17 @@ export const Settings: React.FC = () => {
     sharePhone: user?.privacy?.sharePhone || 'afterMatch',
   });
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
+  const [travelMode, setTravelMode] = useState({
+    enabled: user?.travelMode?.enabled === true,
+    city: user?.travelMode?.location?.city || '',
+    country: user?.travelMode?.location?.country || '',
+  });
+  const [isSavingTravel, setIsSavingTravel] = useState(false);
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [isLoadingTickets, setIsLoadingTickets] = useState(false);
+  const [ticketSubject, setTicketSubject] = useState('');
+  const [ticketBody, setTicketBody] = useState('');
+  const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -22,6 +39,27 @@ export const Settings: React.FC = () => {
       incognito: user.privacy?.incognito === true,
       sharePhone: user.privacy?.sharePhone || 'afterMatch',
     });
+    setTravelMode({
+      enabled: user.travelMode?.enabled === true,
+      city: user.travelMode?.location?.city || '',
+      country: user.travelMode?.location?.country || '',
+    });
+  }, [user?.id]);
+
+  useEffect(() => {
+    const loadTickets = async () => {
+      if (!user?.id) return;
+      try {
+        setIsLoadingTickets(true);
+        const data = await supportService.listTickets();
+        setTickets(data || []);
+      } catch (_e) {
+        // silencieux
+      } finally {
+        setIsLoadingTickets(false);
+      }
+    };
+    loadTickets();
   }, [user?.id]);
 
   const savePrivacy = async (nextPrivacy = privacy) => {
@@ -34,6 +72,49 @@ export const Settings: React.FC = () => {
       toast.error(error.response?.data?.message || 'Erreur lors de la mise à jour');
     } finally {
       setIsSavingPrivacy(false);
+    }
+  };
+
+  const saveTravelMode = async (next = travelMode) => {
+    try {
+      const ent = getEntitlements(subscription?.type);
+      if (!ent.canTravelMode) {
+        toast.error('Mode voyage réservé aux abonnements Premium');
+        return;
+      }
+      setIsSavingTravel(true);
+      const updatedUser = await subscriptionService.setTravelMode({
+        enabled: next.enabled,
+        location: {
+          country: next.country || null,
+          city: next.city || null,
+        },
+      });
+      updateUser(updatedUser);
+      toast.success('Mode voyage mis à jour');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erreur lors de la mise à jour');
+    } finally {
+      setIsSavingTravel(false);
+    }
+  };
+
+  const submitTicket = async () => {
+    if (!ticketSubject.trim() || !ticketBody.trim()) {
+      toast.error('Veuillez renseigner un sujet et un message');
+      return;
+    }
+    try {
+      setIsSubmittingTicket(true);
+      const created = await supportService.createTicket(ticketSubject.trim(), ticketBody.trim());
+      setTickets((prev) => [created, ...prev]);
+      setTicketSubject('');
+      setTicketBody('');
+      toast.success('Ticket envoyé');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erreur lors de l’envoi');
+    } finally {
+      setIsSubmittingTicket(false);
     }
   };
 
@@ -172,11 +253,134 @@ export const Settings: React.FC = () => {
               </p>
             </div>
 
+            {/* Premium */}
+            <div className="border-b border-gray-200 pb-6">
+              <h2 className="text-xl font-semibold text-gray-800 mb-2">Premium</h2>
+              <p className="text-gray-600">
+                Options avancées disponibles avec un abonnement Premium
+              </p>
+
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-semibold text-gray-900">Mode voyage</p>
+                    <p className="text-sm text-gray-600">
+                      Définissez une ville/pays cible pour votre mode voyage (MVP).
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={travelMode.enabled}
+                      onChange={(e) => {
+                        const next = { ...travelMode, enabled: e.target.checked };
+                        setTravelMode(next);
+                        saveTravelMode(next);
+                      }}
+                      disabled={isSavingTravel}
+                    />
+                    <span className={`w-12 h-7 flex items-center rounded-full p-1 transition-colors ${travelMode.enabled ? 'bg-green-500' : 'bg-gray-300'}`}>
+                      <span className={`bg-white w-5 h-5 rounded-full shadow transform transition-transform ${travelMode.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </span>
+                  </label>
+                </div>
+
+                {travelMode.enabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Pays</label>
+                      <input
+                        value={travelMode.country}
+                        onChange={(e) => setTravelMode((p) => ({ ...p, country: e.target.value }))}
+                        onBlur={() => saveTravelMode(travelMode)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        placeholder="Ex: Côte d'Ivoire"
+                        disabled={isSavingTravel}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Ville</label>
+                      <input
+                        value={travelMode.city}
+                        onChange={(e) => setTravelMode((p) => ({ ...p, city: e.target.value }))}
+                        onBlur={() => saveTravelMode(travelMode)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        placeholder="Ex: Abidjan"
+                        disabled={isSavingTravel}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div>
               <h2 className="text-xl font-semibold text-gray-800 mb-2">Aide et Support</h2>
               <p className="text-gray-600">
                 Obtenez de l'aide et contactez le support
               </p>
+
+              <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-gray-200 p-4 bg-gray-50">
+                  <p className="font-semibold text-gray-900 mb-3">Créer un ticket</p>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Sujet</label>
+                  <input
+                    value={ticketSubject}
+                    onChange={(e) => setTicketSubject(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 mb-3"
+                    placeholder="Ex: Problème de paiement"
+                    disabled={isSubmittingTicket}
+                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                  <textarea
+                    value={ticketBody}
+                    onChange={(e) => setTicketBody(e.target.value)}
+                    rows={4}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none mb-3"
+                    placeholder="Décrivez votre problème…"
+                    disabled={isSubmittingTicket}
+                  />
+                  <button
+                    type="button"
+                    onClick={submitTicket}
+                    disabled={isSubmittingTicket}
+                    className="px-4 py-2 rounded-lg bg-[#F26E27] text-white hover:bg-[#c2581f] font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isSubmittingTicket ? 'Envoi…' : 'Envoyer'}
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 p-4">
+                  <p className="font-semibold text-gray-900 mb-3">Mes tickets</p>
+                  {isLoadingTickets ? (
+                    <div className="text-sm text-gray-600">Chargement…</div>
+                  ) : tickets.length === 0 ? (
+                    <div className="text-sm text-gray-600">Aucun ticket.</div>
+                  ) : (
+                    <div className="space-y-3 max-h-64 overflow-auto pr-1">
+                      {tickets.map((t) => (
+                        <div key={t.id} className="p-3 rounded-lg border border-gray-200 bg-white">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="font-semibold text-gray-900 truncate">{t.subject}</div>
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                              t.status === 'open' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-green-50 text-green-700 border border-green-200'
+                            }`}>
+                              {t.status === 'open' ? 'Ouvert' : t.status}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">
+                            {t.body}
+                          </div>
+                          <div className="text-xs text-gray-400 mt-2">
+                            {new Date(t.createdAt).toLocaleString('fr-FR')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -62,7 +62,7 @@ export const setupSocket = (io) => {
     });
 
     // Envoyer un message
-    socket.on('message:send', async ({ receiverId, content, type, imageUrl }) => {
+    socket.on('message:send', async ({ receiverId, content, type, imageUrl, voiceUrl, replyToMessageId }) => {
       try {
         // Vérifier les limites (sauf en développement où tout est illimité)
         if (process.env.NODE_ENV !== 'development') {
@@ -85,6 +85,10 @@ export const setupSocket = (io) => {
 
         // Créer le message
         const msgType = type || 'text';
+        if (msgType === 'audio' && !voiceUrl) {
+          socket.emit('message:error', { message: 'Fichier audio requis' });
+          return;
+        }
         const analysis =
           msgType === 'text' || (msgType === 'image' && content)
             ? analyzeMessageContent(content || '')
@@ -106,7 +110,12 @@ export const setupSocket = (io) => {
           content,
           msgType,
           imageUrl,
-          { riskScore: analysis.riskScore, riskFlags: analysis.riskFlags }
+          {
+            riskScore: analysis.riskScore,
+            riskFlags: analysis.riskFlags,
+            voiceUrl: voiceUrl || null,
+            replyToMessageId: replyToMessageId || null,
+          }
         );
 
         // Incrémenter le compteur
@@ -121,6 +130,19 @@ export const setupSocket = (io) => {
       } catch (error) {
         console.error('Socket message send error:', error);
         socket.emit('message:error', { message: 'Erreur lors de l\'envoi du message' });
+      }
+    });
+
+    // Réagir à un message (toggle)
+    socket.on('message:reaction', async ({ messageId, emoji }) => {
+      try {
+        const result = await MessageModel.toggleReaction(messageId, socket.userId, emoji);
+        if (result?.conversationId) {
+          io.to(`conversation:${result.conversationId}`).emit('message:reaction', result);
+        }
+      } catch (error) {
+        console.error('Socket reaction error:', error);
+        socket.emit('message:error', { message: 'Erreur lors de la réaction' });
       }
     });
 

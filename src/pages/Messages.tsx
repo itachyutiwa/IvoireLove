@@ -11,7 +11,7 @@ import { MessagingMenu } from '@/components/contact/MessagingMenu';
 import { Modal } from '@/components/ui/Modal';
 import { formatRelativeTime } from '@/utils/helpers';
 import { User } from '@/types';
-import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown, IoEllipsisVertical } from 'react-icons/io5';
+import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown, IoEllipsisVertical, IoMic } from 'react-icons/io5';
 import { LocationMessage } from '@/components/chat/LocationMessage';
 import toast from 'react-hot-toast';
 
@@ -44,6 +44,9 @@ export const Messages: React.FC = () => {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingVoice, setUploadingVoice] = useState(false);
+  const [previewVoice, setPreviewVoice] = useState<string | null>(null);
+  const voiceInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [otherUser, setOtherUser] = useState<User | null>(null);
   const [showMessagingMenu, setShowMessagingMenu] = useState(false);
@@ -61,6 +64,7 @@ export const Messages: React.FC = () => {
   const [reportDetails, setReportDetails] = useState<string>('');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [isBlockingUser, setIsBlockingUser] = useState(false);
+  const [replyToMessage, setReplyToMessage] = useState<any | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -334,7 +338,7 @@ export const Messages: React.FC = () => {
   };
 
   const handleSendMessage = async () => {
-    if ((!messageText.trim() && !previewImage) || !selectedConversationId || !user) return;
+    if ((!messageText.trim() && !previewImage && !previewVoice) || !selectedConversationId || !user) return;
 
     // Trouver la conversation
     const conversation = conversations.find((c) => c.id === selectedConversationId);
@@ -364,11 +368,21 @@ export const Messages: React.FC = () => {
       let sentMessage: any = null;
       if (previewImage) {
         // Envoyer une image
-        sentMessage = await messageService.sendMessage(receiverId, messageText || 'Photo', 'image', previewImage);
+        sentMessage = await messageService.sendMessage(receiverId, messageText || 'Photo', 'image', previewImage, {
+          replyToMessageId: replyToMessage?.id,
+        });
         setPreviewImage(null);
+      } else if (previewVoice) {
+        sentMessage = await messageService.sendMessage(receiverId, messageText || 'Message vocal', 'audio', undefined, {
+          voiceUrl: previewVoice,
+          replyToMessageId: replyToMessage?.id,
+        });
+        setPreviewVoice(null);
       } else {
         // Envoyer un message texte
-        sentMessage = await messageService.sendMessage(receiverId, messageText);
+        sentMessage = await messageService.sendMessage(receiverId, messageText, 'text', undefined, {
+          replyToMessageId: replyToMessage?.id,
+        });
       }
       
       console.log('Message sent successfully:', sentMessage);
@@ -385,6 +399,7 @@ export const Messages: React.FC = () => {
       }
       
       setMessageText('');
+      setReplyToMessage(null);
       
       // Recharger les messages depuis le serveur pour avoir la version complète
       if (selectedConversationId) {
@@ -435,6 +450,32 @@ export const Messages: React.FC = () => {
       setUploadingImage(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleVoiceSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Le fichier audio doit faire moins de 5MB');
+      return;
+    }
+
+    setUploadingVoice(true);
+    try {
+      const voiceUrl = await messageService.uploadVoice(file);
+      const fullUrl = voiceUrl.startsWith('http')
+        ? voiceUrl
+        : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${voiceUrl}`;
+      setPreviewVoice(fullUrl);
+    } catch (_error: any) {
+      toast.error("Erreur lors de l'upload de l'audio");
+    } finally {
+      setUploadingVoice(false);
+      if (voiceInputRef.current) {
+        voiceInputRef.current.value = '';
       }
     }
   };
@@ -820,12 +861,20 @@ export const Messages: React.FC = () => {
                     
                     const isOwn = message.senderId === user?.id;
                     const isImage = message.type === 'image' && message.imageUrl;
+                    const isAudio = message.type === 'audio' && message.voiceUrl;
                     const canDeleteForAll =
                       isOwn &&
                       !!message.timestamp &&
                       Date.now() - new Date(message.timestamp).getTime() <= 24 * 60 * 60 * 1000;
                     const isDeleted = message.deletedForEveryone === true;
                     const riskWarning = getRiskWarning(message.riskScore, message.riskFlags);
+                    const repliedMessage = message.replyToMessageId
+                      ? conversationMessages.find((m: any) => m.id === message.replyToMessageId)
+                      : null;
+                    const reactionsObj: Record<string, string[]> = message.reactions || {};
+                    const reactionEntries = Object.entries(reactionsObj).filter(
+                      ([, ids]) => Array.isArray(ids) && ids.length > 0
+                    );
                     
                     // Détecter si c'est un message de position
                     const locationMatch = message.content?.match(/📍 Ma position actuelle: https:\/\/www\.google\.com\/maps\?q=([\d.-]+),([\d.-]+)/);
@@ -860,7 +909,7 @@ export const Messages: React.FC = () => {
                             </div>
                           )}
                           {/* Menu ˅ en haut à droite */}
-                          {isOwn && !isDeleted && (
+                          {!isDeleted && (
                             <div className="absolute top-1 right-1 z-10" ref={openMessageMenuId === message.id ? messageMenuRef : undefined}>
                               <button
                                 type="button"
@@ -874,27 +923,70 @@ export const Messages: React.FC = () => {
                               </button>
 
                               {openMessageMenuId === message.id && (
-                                <div className="absolute top-7 right-0 w-52 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden">
+                                <div className="absolute top-7 right-0 w-60 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden">
                                   <button
                                     type="button"
                                     onClick={() => {
                                       setOpenMessageMenuId(null);
-                                      handleDeleteForEveryone(message.id, message.timestamp);
+                                      setReplyToMessage(message);
                                     }}
-                                    disabled={!canDeleteForAll}
-                                    className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors ${
-                                      canDeleteForAll
-                                        ? 'hover:bg-gray-50 text-red-600'
-                                        : 'text-gray-400 cursor-not-allowed'
-                                    }`}
+                                    className="w-full px-4 py-3 text-left text-sm font-medium hover:bg-gray-50 transition-colors"
                                   >
-                                    Supprimer pour tous
-                                    {!canDeleteForAll && (
-                                      <span className="block text-xs text-gray-400 mt-0.5">
-                                        Disponible pendant 24h après l’envoi
-                                      </span>
-                                    )}
+                                    Répondre
                                   </button>
+
+                                  <div className="px-4 py-3 border-t border-gray-100">
+                                    <p className="text-xs font-semibold text-gray-600 mb-2">Réagir</p>
+                                    <div className="flex items-center gap-2">
+                                      {['👍', '❤️', '😂', '😮', '😢'].map((emoji) => (
+                                        <button
+                                          key={emoji}
+                                          type="button"
+                                          onClick={async () => {
+                                            try {
+                                              const res = await messageService.toggleReaction(message.id, emoji);
+                                              useMessageStore.getState().updateMessageReactions?.(
+                                                res.conversationId,
+                                                res.messageId,
+                                                res.reactions
+                                              );
+                                            } catch (e: any) {
+                                              toast.error(e?.response?.data?.message || 'Impossible de réagir');
+                                            } finally {
+                                              setOpenMessageMenuId(null);
+                                            }
+                                          }}
+                                          className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center"
+                                          title={`Réagir ${emoji}`}
+                                        >
+                                          <span className="text-lg">{emoji}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {isOwn && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenMessageMenuId(null);
+                                        handleDeleteForEveryone(message.id, message.timestamp);
+                                      }}
+                                      disabled={!canDeleteForAll}
+                                      className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors border-t border-gray-100 ${
+                                        canDeleteForAll
+                                          ? 'hover:bg-gray-50 text-red-600'
+                                          : 'text-gray-400 cursor-not-allowed'
+                                      }`}
+                                    >
+                                      Supprimer pour tous
+                                      {!canDeleteForAll && (
+                                        <span className="block text-xs text-gray-400 mt-0.5">
+                                          Disponible pendant 24h après l’envoi
+                                        </span>
+                                      )}
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -941,6 +1033,20 @@ export const Messages: React.FC = () => {
                             </>
                           ) : isImage ? (
                             <>
+                              {repliedMessage && (
+                                <div className={`mb-2 px-3 py-2 rounded-lg ${isOwn ? 'bg-primary-700/40' : 'bg-gray-100'} border-l-4 ${isOwn ? 'border-white/70' : 'border-[#F26E27]'}`}>
+                                  <p className={`text-xs font-semibold ${isOwn ? 'text-primary-100' : 'text-gray-700'}`}>
+                                    Réponse
+                                  </p>
+                                  <p className={`text-xs ${isOwn ? 'text-primary-100/90' : 'text-gray-600'} truncate`}>
+                                    {repliedMessage.type === 'image'
+                                      ? '📷 Photo'
+                                      : repliedMessage.type === 'audio'
+                                        ? '🎤 Audio'
+                                        : (repliedMessage.content || '')}
+                                  </p>
+                                </div>
+                              )}
                               <div className="space-y-1">
                                 <img
                                   src={(() => {
@@ -996,8 +1102,64 @@ export const Messages: React.FC = () => {
                                 </p>
                               )}
                             </>
+                          ) : isAudio ? (
+                            <>
+                              {repliedMessage && (
+                                <div className={`mb-2 px-3 py-2 rounded-lg ${isOwn ? 'bg-primary-700/40' : 'bg-gray-100'} border-l-4 ${isOwn ? 'border-white/70' : 'border-[#F26E27]'}`}>
+                                  <p className={`text-xs font-semibold ${isOwn ? 'text-primary-100' : 'text-gray-700'}`}>
+                                    Réponse
+                                  </p>
+                                  <p className={`text-xs ${isOwn ? 'text-primary-100/90' : 'text-gray-600'} truncate`}>
+                                    {repliedMessage.type === 'image'
+                                      ? '📷 Photo'
+                                      : repliedMessage.type === 'audio'
+                                        ? '🎤 Audio'
+                                        : (repliedMessage.content || '')}
+                                  </p>
+                                </div>
+                              )}
+                              <audio
+                                controls
+                                src={(() => {
+                                  const v = message.voiceUrl || '';
+                                  return v.startsWith('http')
+                                    ? v
+                                    : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${v}`;
+                                })()}
+                                className="w-64 max-w-full"
+                              />
+                              {message.timestamp && (
+                                <p
+                                  className={`text-xs mt-1 flex items-center ${
+                                    isOwn ? 'text-primary-100' : 'text-gray-500'
+                                  }`}
+                                >
+                                  <span>{formatRelativeTime(message.timestamp)}</span>
+                                  {isOwn && message.read && (
+                                    <span className="ml-1" title="Lu">✓✓</span>
+                                  )}
+                                  {isOwn && !message.read && (
+                                    <span className="ml-1 text-primary-200" title="Envoyé">✓</span>
+                                  )}
+                                </p>
+                              )}
+                            </>
                           ) : (
                             <>
+                              {repliedMessage && (
+                                <div className={`mb-2 px-3 py-2 rounded-lg ${isOwn ? 'bg-primary-700/40' : 'bg-gray-100'} border-l-4 ${isOwn ? 'border-white/70' : 'border-[#F26E27]'}`}>
+                                  <p className={`text-xs font-semibold ${isOwn ? 'text-primary-100' : 'text-gray-700'}`}>
+                                    Réponse
+                                  </p>
+                                  <p className={`text-xs ${isOwn ? 'text-primary-100/90' : 'text-gray-600'} truncate`}>
+                                    {repliedMessage.type === 'image'
+                                      ? '📷 Photo'
+                                      : repliedMessage.type === 'audio'
+                                        ? '🎤 Audio'
+                                        : (repliedMessage.content || '')}
+                                  </p>
+                                </div>
+                              )}
                               <p className="whitespace-pre-wrap break-words">{message.content || ''}</p>
                               {message.timestamp && (
                                 <p
@@ -1019,6 +1181,20 @@ export const Messages: React.FC = () => {
                             </>
                           )}
                           </div>
+                          {reactionEntries.length > 0 && (
+                            <div className={`mt-1 flex flex-wrap gap-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                              {reactionEntries.map(([emoji, ids]) => (
+                                <span
+                                  key={emoji}
+                                  className="px-2 py-0.5 rounded-full bg-white/90 border border-gray-200 text-xs flex items-center gap-1 shadow-sm"
+                                  title={`${ids.length} réaction(s)`}
+                                >
+                                  <span>{emoji}</span>
+                                  <span className="text-gray-600 font-semibold">{ids.length}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1034,6 +1210,30 @@ export const Messages: React.FC = () => {
             </div>
 
             <div className="bg-white border-t border-gray-200 p-4">
+              {/* Réponse */}
+              {replyToMessage && (
+                <div className="mb-3 flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-700">Réponse</p>
+                    <p className="text-xs text-gray-600 truncate">
+                      {replyToMessage.type === 'image'
+                        ? '📷 Photo'
+                        : replyToMessage.type === 'audio'
+                          ? '🎤 Audio'
+                          : (replyToMessage.content || '')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReplyToMessage(null)}
+                    className="p-2 rounded-lg hover:bg-gray-100"
+                    title="Annuler la réponse"
+                  >
+                    <IoClose size={18} />
+                  </button>
+                </div>
+              )}
+
               {/* Aperçu de l'image */}
               {previewImage && (
                 <div className="mb-3 relative inline-block">
@@ -1054,12 +1254,35 @@ export const Messages: React.FC = () => {
                 </div>
               )}
 
+              {/* Aperçu audio */}
+              {previewVoice && (
+                <div className="mb-3">
+                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50">
+                    <audio controls src={previewVoice} className="w-full" />
+                    <button
+                      onClick={() => setPreviewVoice(null)}
+                      className="p-2 bg-[#F26E27] text-white rounded-lg hover:bg-[#c2581f] transition-colors"
+                      title="Supprimer l'audio"
+                    >
+                      <IoClose size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center space-x-2">
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
                   onChange={handleImageSelect}
+                  className="hidden"
+                />
+                <input
+                  ref={voiceInputRef}
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleVoiceSelect}
                   className="hidden"
                 />
                 {/* Menu d'actions (+) comme WhatsApp */}
@@ -1109,6 +1332,26 @@ export const Messages: React.FC = () => {
                           <p className="text-xs text-gray-500">Partager votre localisation</p>
                         </div>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAttachMenu(false);
+                          voiceInputRef.current?.click();
+                        }}
+                        disabled={uploadingVoice}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors border-t border-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {uploadingVoice ? (
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-600"></div>
+                        ) : (
+                          <IoMic size={20} className="text-gray-700" />
+                        )}
+                        <div className="text-left">
+                          <p className="text-sm font-semibold text-gray-900">Audio</p>
+                          <p className="text-xs text-gray-500">Envoyer un message vocal</p>
+                        </div>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1122,12 +1365,12 @@ export const Messages: React.FC = () => {
                       handleSendMessage();
                     }
                   }}
-                  placeholder={previewImage ? "Ajouter un message (optionnel)..." : "Tapez un message..."}
+                  placeholder={previewImage || previewVoice ? "Ajouter un message (optionnel)..." : "Tapez un message..."}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
                 <button
                   onClick={handleSendMessage}
-                  disabled={(!messageText.trim() && !previewImage) || uploadingImage}
+                  disabled={(!messageText.trim() && !previewImage && !previewVoice) || uploadingImage || uploadingVoice}
                   className="p-3 bg-[#F26E27] text-white rounded-lg hover:bg-[#c2581f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <IoPaperPlane size={20} />
