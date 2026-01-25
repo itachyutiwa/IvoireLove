@@ -141,5 +141,43 @@ router.post('/conversations/:conversationId/read', authenticateToken, async (req
   }
 });
 
+// Supprimer un message "pour tous" (dans les 24h)
+router.delete('/:messageId', authenticateToken, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const requesterId = req.user.userId;
+
+    const result = await MessageModel.deleteForEveryone(messageId, requesterId);
+
+    // Notifier en temps réel les deux utilisateurs + la conversation
+    const io = req.app.get('io');
+    if (io && result?.conversationId) {
+      const payload = {
+        conversationId: result.conversationId,
+        messageId: result.messageId,
+        deletedAt: result.deletedAt,
+      };
+      io.to(`conversation:${result.conversationId}`).emit('message:deleted', payload);
+      if (result.senderId) io.to(`user:${result.senderId}`).emit('message:deleted', payload);
+      if (result.receiverId) io.to(`user:${result.receiverId}`).emit('message:deleted', payload);
+    }
+
+    res.json({ message: 'Message supprimé', ...result });
+  } catch (error) {
+    if (error?.code === 'NOT_FOUND') {
+      return res.status(404).json({ message: error.message || 'Message introuvable' });
+    }
+    if (error?.code === 'FORBIDDEN') {
+      return res.status(403).json({ message: error.message || 'Action non autorisée' });
+    }
+    if (error?.code === 'TOO_LATE') {
+      return res.status(400).json({ message: error.message || 'Délai dépassé' });
+    }
+
+    console.error('Delete message error:', error);
+    res.status(500).json({ message: 'Erreur lors de la suppression du message' });
+  }
+});
+
 export default router;
 

@@ -10,7 +10,7 @@ import { MessagingMenu } from '@/components/contact/MessagingMenu';
 import { Modal } from '@/components/ui/Modal';
 import { formatRelativeTime } from '@/utils/helpers';
 import { User } from '@/types';
-import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd } from 'react-icons/io5';
+import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown, IoTrash } from 'react-icons/io5';
 import { LocationMessage } from '@/components/chat/LocationMessage';
 import toast from 'react-hot-toast';
 
@@ -48,6 +48,7 @@ export const Messages: React.FC = () => {
   const [showMessagingMenu, setShowMessagingMenu] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const [openMsgMenuId, setOpenMsgMenuId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -65,6 +66,18 @@ export const Messages: React.FC = () => {
     return () => {
       socketService.disconnect();
     };
+  }, []);
+
+  // Fermer le menu (chevron) de message si clic à l'extérieur
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-msg-menu="true"]')) return;
+      setOpenMsgMenuId(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Fermer le menu "+" si clic à l'extérieur
@@ -392,6 +405,32 @@ export const Messages: React.FC = () => {
     }
   };
 
+  const handleDeleteForEveryone = async (messageId: string, messageTimestamp?: string) => {
+    if (!selectedConversationId) return;
+
+    // Vérifier délai 24h côté UI (le backend vérifie aussi)
+    if (messageTimestamp) {
+      const createdAt = new Date(messageTimestamp).getTime();
+      const maxDelayMs = 24 * 60 * 60 * 1000;
+      if (Date.now() - createdAt > maxDelayMs) {
+        toast.error('Suppression pour tous possible uniquement dans les 24 heures');
+        return;
+      }
+    }
+
+    const ok = window.confirm('Supprimer ce message pour vous et le destinataire ? (max 24h)');
+    if (!ok) return;
+
+    try {
+      await messageService.deleteMessage(messageId);
+      // Mise à jour immédiate (le socket fera aussi le sync)
+      useMessageStore.getState().markMessageDeleted?.(selectedConversationId, messageId, new Date().toISOString());
+      toast.success('Message supprimé');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Impossible de supprimer le message');
+    }
+  };
+
   if (error) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -663,6 +702,11 @@ export const Messages: React.FC = () => {
                     
                     const isOwn = message.senderId === user?.id;
                     const isImage = message.type === 'image' && message.imageUrl;
+                    const canDeleteForAll =
+                      isOwn &&
+                      !!message.timestamp &&
+                      Date.now() - new Date(message.timestamp).getTime() <= 24 * 60 * 60 * 1000;
+                    const isDeleted = message.deletedForEveryone === true;
                     
                     // Détecter si c'est un message de position
                     const locationMatch = message.content?.match(/📍 Ma position actuelle: https:\/\/www\.google\.com\/maps\?q=([\d.-]+),([\d.-]+)/);
@@ -675,14 +719,64 @@ export const Messages: React.FC = () => {
                         key={message.id}
                         className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'}`}
                       >
-                        <div
-                          className={`max-w-xs lg:max-w-md rounded-2xl shadow-sm ${
-                            isOwn
-                              ? 'bg-[#F26E27] text-white rounded-tr-sm shadow-md'
-                              : 'bg-white text-gray-900 border-2 border-secondary-200 rounded-tl-sm shadow-sm'
-                          } ${isLocation ? 'p-0' : 'px-4 py-2'}`}
-                        >
-                          {isLocation && locationLat && locationLng ? (
+                        <div className="relative max-w-xs lg:max-w-md">
+                          {/* Menu (chevron ↓) en haut à droite du message */}
+                          {canDeleteForAll && !isDeleted && (
+                            <div className="absolute -top-2 right-0 z-10" data-msg-menu="true">
+                              <button
+                                type="button"
+                                onClick={() => setOpenMsgMenuId((prev) => (prev === message.id ? null : message.id))}
+                                className="p-1.5 rounded-full bg-white border border-gray-200 shadow-md"
+                                title="Options"
+                              >
+                                <IoChevronDown size={14} className="text-gray-600" />
+                              </button>
+
+                              {openMsgMenuId === message.id && (
+                                <div className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMsgMenuId(null);
+                                      handleDeleteForEveryone(message.id, message.timestamp);
+                                    }}
+                                    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors"
+                                  >
+                                    <IoTrash size={18} className="text-red-600" />
+                                    <div className="text-left">
+                                      <p className="text-sm font-semibold text-gray-900">Supprimer pour tous</p>
+                                      <p className="text-xs text-gray-500">Disponible pendant 24h</p>
+                                    </div>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div
+                            className={`rounded-2xl shadow-sm ${
+                              isOwn
+                                ? 'bg-[#F26E27] text-white rounded-tr-sm shadow-md'
+                                : 'bg-white text-gray-900 border-2 border-secondary-200 rounded-tl-sm shadow-sm'
+                            } ${isLocation ? 'p-0' : 'px-4 py-2'}`}
+                          >
+                          {isDeleted ? (
+                            <>
+                              <p className={`italic ${isOwn ? 'text-primary-100' : 'text-gray-500'} whitespace-pre-wrap break-words`}>
+                                  {isOwn ? '<Vous avez supprimé ce message>' : '<Ce message a été supprimé>'}
+                              </p>
+                              {message.timestamp && (
+                                <p
+                                  className={`text-xs mt-1 flex items-center ${
+                                    isOwn ? 'text-primary-100' : 'text-gray-500'
+                                  }`}
+                                >
+                                  <span>{formatRelativeTime(message.timestamp)}</span>
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                          isLocation && locationLat && locationLng ? (
                             <>
                               <LocationMessage lat={locationLat} lng={locationLng} isOwn={isOwn} />
                               {message.timestamp && (
@@ -781,7 +875,8 @@ export const Messages: React.FC = () => {
                                 </p>
                               )}
                             </>
-                          )}
+                          ))}{/* end message content */}
+                          </div>
                         </div>
                       </div>
                     );
