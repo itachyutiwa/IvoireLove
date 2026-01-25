@@ -10,7 +10,7 @@ import { MessagingMenu } from '@/components/contact/MessagingMenu';
 import { Modal } from '@/components/ui/Modal';
 import { formatRelativeTime } from '@/utils/helpers';
 import { User } from '@/types';
-import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown, IoTrash } from 'react-icons/io5';
+import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown } from 'react-icons/io5';
 import { LocationMessage } from '@/components/chat/LocationMessage';
 import toast from 'react-hot-toast';
 
@@ -48,7 +48,8 @@ export const Messages: React.FC = () => {
   const [showMessagingMenu, setShowMessagingMenu] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
-  const [openMsgMenuId, setOpenMsgMenuId] = useState<string | null>(null);
+  const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
+  const messageMenuRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -68,23 +69,22 @@ export const Messages: React.FC = () => {
     };
   }, []);
 
-  // Fermer le menu (chevron) de message si clic à l'extérieur
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target) return;
-      if (target.closest('[data-msg-menu="true"]')) return;
-      setOpenMsgMenuId(null);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   // Fermer le menu "+" si clic à l'extérieur
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (attachMenuRef.current && !attachMenuRef.current.contains(event.target as Node)) {
         setShowAttachMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Fermer le menu "˅" des messages si clic à l'extérieur
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (messageMenuRef.current && !messageMenuRef.current.contains(event.target as Node)) {
+        setOpenMessageMenuId(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -424,7 +424,7 @@ export const Messages: React.FC = () => {
     try {
       await messageService.deleteMessage(messageId);
       // Mise à jour immédiate (le socket fera aussi le sync)
-      useMessageStore.getState().markMessageDeleted?.(selectedConversationId, messageId, new Date().toISOString());
+      useMessageStore.getState().markMessageDeleted?.(selectedConversationId, messageId, user?.id);
       toast.success('Message supprimé');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Impossible de supprimer le message');
@@ -719,34 +719,42 @@ export const Messages: React.FC = () => {
                         key={message.id}
                         className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'}`}
                       >
-                        <div className="relative max-w-xs lg:max-w-md">
-                          {/* Menu (chevron ↓) en haut à droite du message */}
-                          {canDeleteForAll && !isDeleted && (
-                            <div className="absolute -top-2 right-0 z-10" data-msg-menu="true">
+                        <div className="relative group max-w-xs lg:max-w-md">
+                          {/* Menu ˅ en haut à droite */}
+                          {isOwn && !isDeleted && (
+                            <div className="absolute top-1 right-1 z-10" ref={openMessageMenuId === message.id ? messageMenuRef : undefined}>
                               <button
                                 type="button"
-                                onClick={() => setOpenMsgMenuId((prev) => (prev === message.id ? null : message.id))}
-                                className="p-1.5 rounded-full bg-white border border-gray-200 shadow-md"
-                                title="Options"
+                                onClick={() => setOpenMessageMenuId((prev) => (prev === message.id ? null : message.id))}
+                                className={`p-1 rounded-full bg-white/90 hover:bg-white border border-gray-200 shadow-sm transition-colors ${
+                                  openMessageMenuId === message.id ? 'ring-2 ring-[#F26E27]/30' : ''
+                                }`}
+                                title="Options du message"
                               >
-                                <IoChevronDown size={14} className="text-gray-600" />
+                                <IoChevronDown size={14} className="text-gray-700" />
                               </button>
 
-                              {openMsgMenuId === message.id && (
-                                <div className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden">
+                              {openMessageMenuId === message.id && (
+                                <div className="absolute top-7 right-0 w-52 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden">
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setOpenMsgMenuId(null);
+                                      setOpenMessageMenuId(null);
                                       handleDeleteForEveryone(message.id, message.timestamp);
                                     }}
-                                    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors"
+                                    disabled={!canDeleteForAll}
+                                    className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors ${
+                                      canDeleteForAll
+                                        ? 'hover:bg-gray-50 text-red-600'
+                                        : 'text-gray-400 cursor-not-allowed'
+                                    }`}
                                   >
-                                    <IoTrash size={18} className="text-red-600" />
-                                    <div className="text-left">
-                                      <p className="text-sm font-semibold text-gray-900">Supprimer pour tous</p>
-                                      <p className="text-xs text-gray-500">Disponible pendant 24h</p>
-                                    </div>
+                                    Supprimer pour tous
+                                    {!canDeleteForAll && (
+                                      <span className="block text-xs text-gray-400 mt-0.5">
+                                        Disponible pendant 24h après l’envoi
+                                      </span>
+                                    )}
                                   </button>
                                 </div>
                               )}
@@ -755,28 +763,23 @@ export const Messages: React.FC = () => {
 
                           <div
                             className={`rounded-2xl shadow-sm ${
-                              isOwn
-                                ? 'bg-[#F26E27] text-white rounded-tr-sm shadow-md'
-                                : 'bg-white text-gray-900 border-2 border-secondary-200 rounded-tl-sm shadow-sm'
+                            isOwn
+                              ? 'bg-[#F26E27] text-white rounded-tr-sm shadow-md'
+                              : 'bg-white text-gray-900 border-2 border-secondary-200 rounded-tl-sm shadow-sm'
                             } ${isLocation ? 'p-0' : 'px-4 py-2'}`}
                           >
                           {isDeleted ? (
-                            <>
-                              <p className={`italic ${isOwn ? 'text-primary-100' : 'text-gray-500'} whitespace-pre-wrap break-words`}>
-                                  {isOwn ? '<Vous avez supprimé ce message>' : '<Ce message a été supprimé>'}
+                            <div className="px-4 py-2">
+                              <p className={`text-sm italic ${isOwn ? 'text-primary-100' : 'text-gray-500'}`}>
+                                {isOwn ? 'Vous avez supprimé ce message' : 'Ce message a été supprimé'}
                               </p>
                               {message.timestamp && (
-                                <p
-                                  className={`text-xs mt-1 flex items-center ${
-                                    isOwn ? 'text-primary-100' : 'text-gray-500'
-                                  }`}
-                                >
-                                  <span>{formatRelativeTime(message.timestamp)}</span>
+                                <p className={`text-xs mt-1 ${isOwn ? 'text-primary-100' : 'text-gray-400'}`}>
+                                  {formatRelativeTime(message.timestamp)}
                                 </p>
                               )}
-                            </>
-                          ) : (
-                          isLocation && locationLat && locationLng ? (
+                            </div>
+                          ) : isLocation && locationLat && locationLng ? (
                             <>
                               <LocationMessage lat={locationLat} lng={locationLng} isOwn={isOwn} />
                               {message.timestamp && (
@@ -875,7 +878,7 @@ export const Messages: React.FC = () => {
                                 </p>
                               )}
                             </>
-                          ))}{/* end message content */}
+                          )}
                           </div>
                         </div>
                       </div>

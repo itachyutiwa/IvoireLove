@@ -2,6 +2,7 @@
 export interface User {
   id: string;
   email: string;
+  phone?: string; // Numéro de téléphone (visible uniquement après match)
   firstName: string;
   lastName: string;
   dateOfBirth: string;
@@ -31,7 +32,6 @@ export interface User {
   verified: boolean;
   createdAt: string;
   lastActive: string;
-  phone?: string; // Numéro de téléphone (visible uniquement après match)
   stats?: {
     likes: number;
     dislikes: number;
@@ -76,6 +76,7 @@ export interface Message {
   readAt?: string;
   deletedForEveryone?: boolean;
   deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface Conversation {

@@ -156,6 +156,7 @@ router.delete('/:messageId', authenticateToken, async (req, res) => {
         conversationId: result.conversationId,
         messageId: result.messageId,
         deletedAt: result.deletedAt,
+        deletedBy: result.deletedBy,
       };
       io.to(`conversation:${result.conversationId}`).emit('message:deleted', payload);
       if (result.senderId) io.to(`user:${result.senderId}`).emit('message:deleted', payload);

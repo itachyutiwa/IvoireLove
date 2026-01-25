@@ -45,6 +45,10 @@ const messageSchema = new mongoose.Schema(
     deletedAt: {
       type: Date,
     },
+    deletedBy: {
+      type: String,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -164,13 +168,14 @@ export const MessageModel = {
               conversationId: conversationId, // Ajouter le conversationId au lastMessage
               senderId: conv.lastMessage.senderId,
               receiverId: conv.lastMessage.receiverId,
-              content: conv.lastMessage.deletedForEveryone ? '' : (conv.lastMessage.content || ''),
-              type: conv.lastMessage.deletedForEveryone ? 'text' : (conv.lastMessage.type || 'text'),
-              imageUrl: conv.lastMessage.deletedForEveryone ? null : conv.lastMessage.imageUrl,
+              content: conv.lastMessage.content || '',
+              type: conv.lastMessage.type || 'text',
+              imageUrl: conv.lastMessage.imageUrl,
               timestamp: conv.lastMessage.createdAt.toISOString(),
               read: conv.lastMessage.read,
               deletedForEveryone: conv.lastMessage.deletedForEveryone === true,
-              deletedAt: conv.lastMessage.deletedAt?.toISOString(),
+              deletedAt: conv.lastMessage.deletedAt ? conv.lastMessage.deletedAt.toISOString() : undefined,
+              deletedBy: conv.lastMessage.deletedBy || undefined,
             }
           : undefined,
         unreadCount,
@@ -193,14 +198,15 @@ export const MessageModel = {
       conversationId,
       senderId: msg.senderId,
       receiverId: msg.receiverId,
-      content: msg.deletedForEveryone ? '' : (msg.content || ''),
-      type: msg.deletedForEveryone ? 'text' : (msg.type || 'text'),
-      imageUrl: msg.deletedForEveryone ? null : msg.imageUrl,
+      content: msg.content || '',
+      type: msg.type || 'text',
+      imageUrl: msg.imageUrl,
       timestamp: msg.createdAt.toISOString(),
       read: msg.read,
       readAt: msg.readAt?.toISOString(),
       deletedForEveryone: msg.deletedForEveryone === true,
-      deletedAt: msg.deletedAt?.toISOString(),
+      deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : undefined,
+      deletedBy: msg.deletedBy || undefined,
     }));
   },
 
@@ -250,6 +256,17 @@ export const MessageModel = {
       throw err;
     }
 
+    if (msg.deletedForEveryone === true) {
+      return {
+        conversationId: msg.conversationId,
+        senderId: msg.senderId,
+        receiverId: msg.receiverId,
+        messageId: msg._id.toString(),
+        deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : new Date().toISOString(),
+        deletedBy: msg.deletedBy || requesterId,
+      };
+    }
+
     if (msg.senderId !== requesterId) {
       const err = new Error('Vous ne pouvez supprimer que vos propres messages');
       err.code = 'FORBIDDEN';
@@ -265,45 +282,22 @@ export const MessageModel = {
       throw err;
     }
 
-    const conversationId = msg.conversationId;
-    const senderId = msg.senderId;
-    const receiverId = msg.receiverId;
-    const wasRead = msg.read === true;
-
-    // Soft-delete (comme WhatsApp) pour conserver une trace et afficher "message supprimé"
+    // Soft-delete: on garde le message mais on masque le contenu comme WhatsApp
     msg.deletedForEveryone = true;
     msg.deletedAt = new Date();
+    msg.deletedBy = requesterId;
+    msg.type = 'text';
     msg.content = '';
     msg.imageUrl = undefined;
-    msg.type = 'text';
     await msg.save();
 
-    // Mettre à jour la conversation (lastMessage + unreadCount)
-    try {
-      const participants = (conversationId || '').split('_').sort();
-      const conversation = await Conversation.findOne({ participants });
-      if (conversation) {
-        // Décrémenter le compteur non lu si le message supprimé n'était pas lu
-        if (!wasRead && receiverId) {
-          const unreadMap = conversation.unreadCount || new Map();
-          const currentCount = unreadMap.get(receiverId) || 0;
-          unreadMap.set(receiverId, Math.max(0, currentCount - 1));
-          conversation.unreadCount = unreadMap;
-        }
-
-        await conversation.save();
-      }
-    } catch (e) {
-      // Ne pas bloquer la suppression si la mise à jour de la conversation échoue
-      // (les conversations seront recalculées au prochain chargement)
-    }
-
     return {
-      conversationId,
-      senderId,
-      receiverId,
+      conversationId: msg.conversationId,
+      senderId: msg.senderId,
+      receiverId: msg.receiverId,
       messageId: msg._id.toString(),
       deletedAt: msg.deletedAt.toISOString(),
+      deletedBy: requesterId,
     };
   },
 };
