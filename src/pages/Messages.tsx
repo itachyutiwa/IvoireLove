@@ -47,6 +47,12 @@ export const Messages: React.FC = () => {
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [previewVoice, setPreviewVoice] = useState<string | null>(null);
   const voiceInputRef = useRef<HTMLInputElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [otherUser, setOtherUser] = useState<User | null>(null);
   const [showMessagingMenu, setShowMessagingMenu] = useState(false);
@@ -477,6 +483,111 @@ export const Messages: React.FC = () => {
       if (voiceInputRef.current) {
         voiceInputRef.current.value = '';
       }
+    }
+  };
+
+  const stopRecordingTimer = () => {
+    if (recordingTimerRef.current) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
+  const cleanupRecorder = () => {
+    stopRecordingTimer();
+    try {
+      mediaRecorderRef.current?.stop();
+    } catch (_e) {
+      // ignore
+    }
+    mediaRecorderRef.current = null;
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    recordingChunksRef.current = [];
+  };
+
+  const startRecording = async () => {
+    // Empêcher les enregistrements multiples
+    if (isRecording || uploadingVoice) return;
+    // Si un audio est déjà en preview, on ne redémarre pas tant qu'il n'est pas supprimé/envoyé
+    if (previewVoice) return;
+
+    try {
+      setRecordingSeconds(0);
+      recordingChunksRef.current = [];
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (evt: BlobEvent) => {
+        if (evt.data && evt.data.size > 0) {
+          recordingChunksRef.current.push(evt.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        try {
+          const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+          if (blob.size < 1024) {
+            // Trop court / vide
+            return;
+          }
+
+          const mime = blob.type || 'audio/webm';
+          const ext =
+            mime.includes('ogg') ? 'ogg' :
+            mime.includes('wav') ? 'wav' :
+            mime.includes('mpeg') ? 'mp3' :
+            mime.includes('mp4') ? 'm4a' :
+            'webm';
+
+          const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
+
+          setUploadingVoice(true);
+          const voiceUrl = await messageService.uploadVoice(file);
+          const fullUrl = voiceUrl.startsWith('http')
+            ? voiceUrl
+            : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${voiceUrl}`;
+          setPreviewVoice(fullUrl);
+        } catch (e: any) {
+          toast.error(e?.response?.data?.message || "Erreur lors de l'upload de l'audio");
+        } finally {
+          setUploadingVoice(false);
+          cleanupRecorder();
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+
+      // Timer UI
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } catch (_e) {
+      cleanupRecorder();
+      toast.error("Impossible d'accéder au micro (permission refusée ?)");
+      setIsRecording(false);
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!isRecording) return;
+    setIsRecording(false);
+    stopRecordingTimer();
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      } else {
+        cleanupRecorder();
+      }
+    } catch (_e) {
+      cleanupRecorder();
     }
   };
 
@@ -1332,26 +1443,6 @@ export const Messages: React.FC = () => {
                           <p className="text-xs text-gray-500">Partager votre localisation</p>
                         </div>
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAttachMenu(false);
-                          voiceInputRef.current?.click();
-                        }}
-                        disabled={uploadingVoice}
-                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors border-t border-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        {uploadingVoice ? (
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-600"></div>
-                        ) : (
-                          <IoMic size={20} className="text-gray-700" />
-                        )}
-                        <div className="text-left">
-                          <p className="text-sm font-semibold text-gray-900">Audio</p>
-                          <p className="text-xs text-gray-500">Envoyer un message vocal</p>
-                        </div>
-                      </button>
                     </div>
                   )}
                 </div>
@@ -1368,9 +1459,43 @@ export const Messages: React.FC = () => {
                   placeholder={previewImage || previewVoice ? "Ajouter un message (optionnel)..." : "Tapez un message..."}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
+
+                {/* Micro: appui pour enregistrer (WhatsApp-like) */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    startRecording();
+                  }}
+                  onPointerUp={(e) => {
+                    e.preventDefault();
+                    stopRecording();
+                  }}
+                  onPointerCancel={(e) => {
+                    e.preventDefault();
+                    stopRecording();
+                  }}
+                  onPointerLeave={(e) => {
+                    e.preventDefault();
+                    stopRecording();
+                  }}
+                  disabled={uploadingVoice || uploadingImage || !!previewVoice}
+                  className={`p-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isRecording ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title={isRecording ? `Enregistrement… ${recordingSeconds}s` : 'Maintenir pour enregistrer'}
+                >
+                  <div className="flex items-center gap-2">
+                    <IoMic size={20} />
+                    {isRecording && (
+                      <span className="text-xs font-semibold tabular-nums">{recordingSeconds}s</span>
+                    )}
+                  </div>
+                </button>
+
                 <button
                   onClick={handleSendMessage}
-                  disabled={(!messageText.trim() && !previewImage && !previewVoice) || uploadingImage || uploadingVoice}
+                  disabled={isRecording || (!messageText.trim() && !previewImage && !previewVoice) || uploadingImage || uploadingVoice}
                   className="p-3 bg-[#F26E27] text-white rounded-lg hover:bg-[#c2581f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <IoPaperPlane size={20} />
