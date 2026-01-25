@@ -244,6 +244,19 @@ export const Messages: React.FC = () => {
     ? (messages[selectedConversationId] || [])
     : [];
 
+  const selectedConversation = selectedConversationId
+    ? conversations.find((c) => c.id === selectedConversationId)
+    : null;
+
+  const getFullAssetUrl = (url?: string | null) => {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    return `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${url}`;
+  };
+
+  const otherUserAvatarUrl = getFullAssetUrl(selectedConversation?.otherUser?.photos?.[0]);
+  const ownAvatarUrl = getFullAssetUrl(user?.photos?.[0]);
+
   const getRiskWarning = (riskScore?: number, riskFlags?: string[]) => {
     const score = typeof riskScore === 'number' ? riskScore : 0;
     if (score < RISK_FLAG_THRESHOLD) return null;
@@ -1149,6 +1162,23 @@ export const Messages: React.FC = () => {
                         key={message.id}
                         className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'}`}
                       >
+                        {/* Avatar pour messages vocaux (réception) */}
+                        {!isOwn && isAudio && (
+                          otherUserAvatarUrl ? (
+                            <img
+                              src={otherUserAvatarUrl}
+                              alt="Profil"
+                              className="w-8 h-8 rounded-full object-cover border border-gray-200 shadow-sm flex-shrink-0"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-xs font-bold flex-shrink-0">
+                              {(selectedConversation?.otherUser?.firstName || '?').charAt(0).toUpperCase()}
+                            </div>
+                          )
+                        )}
                         <div className="relative group max-w-xs lg:max-w-md">
                           {riskWarning && !isDeleted && (
                             <div
@@ -1501,6 +1531,24 @@ export const Messages: React.FC = () => {
                             </div>
                           )}
                         </div>
+
+                        {/* Avatar pour messages vocaux (envoi) */}
+                        {isOwn && isAudio && (
+                          ownAvatarUrl ? (
+                            <img
+                              src={ownAvatarUrl}
+                              alt="Moi"
+                              className="w-8 h-8 rounded-full object-cover border border-gray-200 shadow-sm flex-shrink-0"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-xs font-bold flex-shrink-0">
+                              {(user?.firstName || '?').charAt(0).toUpperCase()}
+                            </div>
+                          )
+                        )}
                       </div>
                     );
                   })}
