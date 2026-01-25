@@ -96,8 +96,11 @@ export interface Message {
   senderId: string;
   receiverId: string;
   content: string;
-  type?: 'text' | 'image';
+  type?: 'text' | 'image' | 'audio';
   imageUrl?: string;
+  voiceUrl?: string | null;
+  replyToMessageId?: string | null;
+  reactions?: Record<string, string[]>;
   timestamp: string;
   read: boolean;
   readAt?: string;
@@ -176,5 +179,15 @@ export interface Notification {
   read: boolean;
   timestamp: string;
   link?: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  userId: string;
+  subject: string;
+  body: string;
+  status: 'open' | 'closed' | string;
+  createdAt: string;
+  updatedAt: string;
 }
 

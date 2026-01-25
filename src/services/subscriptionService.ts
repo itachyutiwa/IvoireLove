@@ -39,6 +39,11 @@ class SubscriptionService {
     const response = await api.get<LikeReceived[]>('/subscriptions/likes-received');
     return response.data;
   }
+
+  async setTravelMode(input: { enabled: boolean; location?: any }) {
+    const response = await api.post('/subscriptions/travel-mode', input);
+    return response.data;
+  }
 }
 
 export const subscriptionService = new SubscriptionService();

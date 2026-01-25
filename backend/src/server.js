@@ -18,6 +18,7 @@ import {
   createVerificationCodeTable,
   createReportTable,
   createBlockTable,
+  createSupportTicketTable,
 } from './models/index.js';
 import { initTestUser } from './utils/initTestUser.js';
 
@@ -29,6 +30,7 @@ import subscriptionRoutes from './routes/subscriptions.js';
 import paymentRoutes from './routes/payments.js';
 import reportRoutes from './routes/reports.js';
 import blockRoutes from './routes/blocks.js';
+import supportRoutes from './routes/support.js';
 
 // Import Socket.io handler
 import { setupSocket } from './socket/socketHandler.js';
@@ -74,6 +76,7 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/blocks', blockRoutes);
+app.use('/api/support', supportRoutes);
 
 // Route de santé
 app.get('/api/health', (req, res) => {
@@ -99,6 +102,7 @@ const startServer = async () => {
     await createVerificationCodeTable(pgPool);
     await createReportTable(pgPool);
     await createBlockTable(pgPool);
+    await createSupportTicketTable(pgPool);
     console.log('✅ Database tables created');
 
     // Créer l'utilisateur de test s'il n'existe pas
@@ -116,6 +120,7 @@ const startServer = async () => {
     const uploadDir = process.env.UPLOAD_DIR || './uploads';
     const messagesUploadDir = path.join(uploadDir, 'messages');
     const verificationUploadDir = path.join(uploadDir, 'verification');
+    const voiceUploadDir = path.join(uploadDir, 'voice');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -124,6 +129,9 @@ const startServer = async () => {
     }
     if (!fs.existsSync(verificationUploadDir)) {
       fs.mkdirSync(verificationUploadDir, { recursive: true });
+    }
+    if (!fs.existsSync(voiceUploadDir)) {
+      fs.mkdirSync(voiceUploadDir, { recursive: true });
     }
 
     // Démarrer le serveur

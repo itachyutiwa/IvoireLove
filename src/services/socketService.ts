@@ -68,6 +68,17 @@ class SocketService {
       }
     });
 
+    // Écouter les réactions (toggle)
+    this.socket.on('message:reaction', (data: { conversationId: string; messageId: string; reactions: Record<string, string[]> }) => {
+      try {
+        if (data?.conversationId && data?.messageId && data?.reactions) {
+          useMessageStore.getState().updateMessageReactions?.(data.conversationId, data.messageId, data.reactions);
+        }
+      } catch (e) {
+        console.error('Error handling message:reaction:', e);
+      }
+    });
+
     // Écouter les nouveaux matchs
     this.socket.on('match:new', (data: { matchId: string; userId: string }) => {
       // Gérer la notification de match

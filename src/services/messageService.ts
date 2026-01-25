@@ -15,14 +15,17 @@ class MessageService {
   async sendMessage(
     receiverId: string,
     content: string,
-    type: 'text' | 'image' = 'text',
-    imageUrl?: string
+    type: 'text' | 'image' | 'audio' = 'text',
+    imageUrl?: string,
+    options?: { voiceUrl?: string; replyToMessageId?: string }
   ): Promise<Message> {
     const response = await api.post<Message>('/messages/send', {
       receiverId,
       content,
       type,
       imageUrl,
+      voiceUrl: options?.voiceUrl,
+      replyToMessageId: options?.replyToMessageId,
     });
     return response.data;
   }
@@ -44,6 +47,25 @@ class MessageService {
 
   async deleteMessage(messageId: string): Promise<void> {
     await api.delete(`/messages/${messageId}`);
+  }
+
+  async uploadVoice(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('voice', file);
+    const response = await api.post<{ url: string }>('/messages/voice', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data.url;
+  }
+
+  async toggleReaction(messageId: string, emoji: string): Promise<{ messageId: string; conversationId: string; reactions: Record<string, string[]> }> {
+    const response = await api.post<{ messageId: string; conversationId: string; reactions: Record<string, string[]> }>(
+      `/messages/${messageId}/reactions`,
+      { emoji }
+    );
+    return response.data;
   }
 }
 

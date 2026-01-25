@@ -5,8 +5,54 @@ import { SubscriptionModel } from '../models/Subscription.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { analyzeMessageContent } from '../services/safetyEngine.js';
 import { BlockModel } from '../models/Block.js';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
+
+// Upload audio messages (MVP)
+const voiceStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const voiceDir = path.join(process.env.UPLOAD_DIR || './uploads', 'voice');
+    try {
+      fs.mkdirSync(voiceDir, { recursive: true });
+    } catch (_e) {
+      // ignore
+    }
+    cb(null, voiceDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+
+const voiceUpload = multer({
+  storage: voiceStorage,
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /mp3|wav|m4a|aac|ogg|webm/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetypeOk = file.mimetype?.startsWith('audio/');
+    if (extname && mimetypeOk) cb(null, true);
+    else cb(new Error('Seuls les fichiers audio sont autorisés'));
+  },
+});
+
+router.post('/voice', authenticateToken, voiceUpload.single('voice'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Aucun fichier fourni' });
+    const url = `/uploads/voice/${req.file.filename}`;
+    res.json({ url });
+  } catch (error) {
+    console.error('Upload voice error:', error);
+    res.status(500).json({ message: 'Erreur lors de l’upload du message vocal' });
+  }
+});
 
 // Obtenir les conversations
 router.get('/conversations', authenticateToken, async (req, res) => {
@@ -106,15 +152,15 @@ router.get('/conversations/:conversationId', authenticateToken, async (req, res)
 // Envoyer un message
 router.post('/send', authenticateToken, async (req, res) => {
   try {
-    const { receiverId, content, type, imageUrl } = req.body;
+    const { receiverId, content, type, imageUrl, voiceUrl, replyToMessageId } = req.body;
     const senderId = req.user.userId;
 
     if (!receiverId) {
       return res.status(400).json({ message: 'Destinataire requis' });
     }
 
-    if (!content && !imageUrl) {
-      return res.status(400).json({ message: 'Contenu ou image requis' });
+    if (!content && !imageUrl && !voiceUrl) {
+      return res.status(400).json({ message: 'Contenu, image ou audio requis' });
     }
 
     // Vérifier les limites d'abonnement (sauf en développement où tout est illimité)
@@ -138,6 +184,9 @@ router.post('/send', authenticateToken, async (req, res) => {
     let message;
     try {
       const msgType = type || 'text';
+      if (msgType === 'audio' && !voiceUrl) {
+        return res.status(400).json({ message: 'Fichier audio requis' });
+      }
       const analysis =
         msgType === 'text' || (msgType === 'image' && content)
           ? analyzeMessageContent(content || '')
@@ -158,7 +207,12 @@ router.post('/send', authenticateToken, async (req, res) => {
         content,
         msgType,
         imageUrl,
-        { riskScore: analysis.riskScore, riskFlags: analysis.riskFlags }
+        {
+          riskScore: analysis.riskScore,
+          riskFlags: analysis.riskFlags,
+          replyToMessageId: replyToMessageId || null,
+          voiceUrl: voiceUrl || null,
+        }
       );
     } catch (error) {
       if (error.message.includes('MongoDB')) {
@@ -177,6 +231,29 @@ router.post('/send', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Send message error:', error);
     res.status(500).json({ message: 'Erreur lors de l\'envoi du message' });
+  }
+});
+
+// Réactions (toggle)
+router.post('/:messageId/reactions', authenticateToken, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { emoji } = req.body || {};
+    const userId = req.user.userId;
+
+    const result = await MessageModel.toggleReaction(messageId, userId, emoji);
+
+    const io = req.app.get('io');
+    if (io && result?.conversationId) {
+      io.to(`conversation:${result.conversationId}`).emit('message:reaction', result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    if (error?.code === 'NOT_FOUND') return res.status(404).json({ message: error.message });
+    if (error?.code === 'FORBIDDEN') return res.status(403).json({ message: error.message });
+    console.error('Toggle reaction error:', error);
+    res.status(500).json({ message: 'Erreur lors de la réaction' });
   }
 });
 
