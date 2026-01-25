@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { pgPool } from '../config/database.js';
 import { UserModel } from '../models/User.js';
@@ -33,6 +34,23 @@ const messagesStorage = multer.diskStorage({
   },
 });
 
+// Configuration Multer pour l'upload de selfie de vérification
+const verificationStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const verificationDir = path.join(process.env.UPLOAD_DIR || './uploads', 'verification');
+    try {
+      fs.mkdirSync(verificationDir, { recursive: true });
+    } catch (_e) {
+      // ignore
+    }
+    cb(null, verificationDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+
 const upload = multer({
   storage,
   limits: {
@@ -53,6 +71,24 @@ const upload = multer({
 
 const messagesUpload = multer({
   storage: messagesStorage,
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seules les images sont autorisées'));
+    }
+  },
+});
+
+const verificationUpload = multer({
+  storage: verificationStorage,
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB
   },
@@ -157,6 +193,77 @@ router.post('/messages/photos', authenticateToken, messagesUpload.single('photo'
   } catch (error) {
     console.error('Upload message photo error:', error);
     res.status(500).json({ message: 'Erreur lors de l\'upload de la photo' });
+  }
+});
+
+// Upload selfie vérification
+router.post('/verification/selfie', authenticateToken, verificationUpload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Aucun fichier fourni' });
+    }
+
+    const photoUrl = `/uploads/verification/${req.file.filename}`;
+    const current = await UserModel.findById(pgPool, req.user.userId);
+    if (!current) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    const updatedUser = await UserModel.update(pgPool, req.user.userId, {
+      verificationPhotoUrl: photoUrl,
+      // On ne change pas le statut ici (submit explicite)
+      verificationStatus: current.verificationStatus || 'unverified',
+    });
+
+    res.json({
+      url: photoUrl,
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error('Upload verification selfie error:', error);
+    res.status(500).json({ message: 'Erreur lors de l\'upload du selfie' });
+  }
+});
+
+// Soumettre une demande de vérification
+router.post('/verification/submit', authenticateToken, async (req, res) => {
+  try {
+    const user = await UserModel.findById(pgPool, req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    if (!user.verificationPhotoUrl) {
+      return res.status(400).json({ message: 'Veuillez d’abord uploader un selfie' });
+    }
+
+    const updatedUser = await UserModel.update(pgPool, req.user.userId, {
+      verificationStatus: 'pending',
+      verified: false,
+      verifiedAt: null,
+    });
+
+    res.json({
+      message: 'Demande de vérification envoyée',
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error('Submit verification error:', error);
+    res.status(500).json({ message: 'Erreur lors de la soumission' });
+  }
+});
+
+// Statut de vérification
+router.get('/verification/status', authenticateToken, async (req, res) => {
+  try {
+    const user = await UserModel.findById(pgPool, req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
+    res.json({
+      verificationStatus: user.verificationStatus || 'unverified',
+      verificationPhotoUrl: user.verificationPhotoUrl || null,
+      verifiedAt: user.verifiedAt || null,
+      verified: user.verified === true,
+    });
+  } catch (error) {
+    console.error('Get verification status error:', error);
+    res.status(500).json({ message: 'Erreur lors de la récupération du statut' });
   }
 });
 

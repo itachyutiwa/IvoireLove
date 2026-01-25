@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { MessageModel } from '../models/Message.js';
 import { SubscriptionModel } from '../models/Subscription.js';
 import { pgPool } from '../config/database.js';
+import { analyzeMessageContent } from '../services/safetyEngine.js';
 
 export const setupSocket = (io) => {
   // Middleware d'authentification Socket.io
@@ -71,12 +72,29 @@ export const setupSocket = (io) => {
         }
 
         // Créer le message
+        const msgType = type || 'text';
+        const analysis =
+          msgType === 'text' || (msgType === 'image' && content)
+            ? analyzeMessageContent(content || '')
+            : { riskScore: 0, riskFlags: [], action: 'allow' };
+
+        if (analysis.action === 'block') {
+          socket.emit('message:error', {
+            message:
+              'Message bloqué pour votre sécurité. Évitez de partager des liens, numéros ou demandes d’argent.',
+            riskScore: analysis.riskScore,
+            riskFlags: analysis.riskFlags,
+          });
+          return;
+        }
+
         const message = await MessageModel.create(
           socket.userId,
           receiverId,
           content,
-          type || 'text',
-          imageUrl
+          msgType,
+          imageUrl,
+          { riskScore: analysis.riskScore, riskFlags: analysis.riskFlags }
         );
 
         // Incrémenter le compteur

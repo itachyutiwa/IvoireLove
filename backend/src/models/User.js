@@ -27,6 +27,9 @@ export const createUserTable = async (pool) => {
       preferences_max_distance INTEGER DEFAULT 50,
       preferences_interested_in TEXT[] DEFAULT '{}',
       verified BOOLEAN DEFAULT FALSE,
+      verification_status VARCHAR(20) DEFAULT 'unverified',
+      verification_photo_url TEXT,
+      verified_at TIMESTAMP,
       device_id VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -78,6 +81,24 @@ export const createUserTable = async (pool) => {
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                          WHERE table_name='users' AND column_name='is_online') THEN
             ALTER TABLE users ADD COLUMN is_online BOOLEAN DEFAULT FALSE;
+          END IF;
+
+          -- Ajouter verification_status si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='verification_status') THEN
+            ALTER TABLE users ADD COLUMN verification_status VARCHAR(20) DEFAULT 'unverified';
+          END IF;
+
+          -- Ajouter verification_photo_url si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='verification_photo_url') THEN
+            ALTER TABLE users ADD COLUMN verification_photo_url TEXT;
+          END IF;
+
+          -- Ajouter verified_at si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='verified_at') THEN
+            ALTER TABLE users ADD COLUMN verified_at TIMESTAMP;
           END IF;
         END $$;
       `);
@@ -262,6 +283,10 @@ export const UserModel = {
       bio: 'bio',
       photos: 'photos',
       phone: 'phone',
+      verified: 'verified',
+      verificationStatus: 'verification_status',
+      verificationPhotoUrl: 'verification_photo_url',
+      verifiedAt: 'verified_at',
       location: null, // Géré séparément
       preferences: null, // Géré séparément
     };
@@ -512,7 +537,10 @@ export const UserModel = {
         maxDistance: row.preferences_max_distance || 50,
         interestedIn: row.preferences_interested_in || [],
       },
-      verified: row.verified,
+      verified: row.verification_status === 'verified' || row.verified === true,
+      verificationStatus: row.verification_status || 'unverified',
+      verificationPhotoUrl: row.verification_photo_url || null,
+      verifiedAt: row.verified_at ? row.verified_at.toISOString() : null,
       createdAt: row.created_at.toISOString(),
       lastActive: row.last_active.toISOString(),
     };

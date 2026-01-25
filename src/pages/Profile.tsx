@@ -14,6 +14,10 @@ export const Profile: React.FC = () => {
   const { user, updateUser } = useAuthStore();
   const { subscription } = useSubscription();
   const [isEditing, setIsEditing] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState<string>(user?.verificationStatus || 'unverified');
+  const [verificationPhotoUrl, setVerificationPhotoUrl] = useState<string | null>(user?.verificationPhotoUrl || null);
+  const [isUploadingVerification, setIsUploadingVerification] = useState(false);
+  const [isSubmittingVerification, setIsSubmittingVerification] = useState(false);
   const [formData, setFormData] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
@@ -39,6 +43,7 @@ export const Profile: React.FC = () => {
   });
   const [photos, setPhotos] = useState<string[]>(user?.photos || []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const verificationFileInputRef = useRef<HTMLInputElement>(null);
 
 
   // Mettre à jour les données quand l'utilisateur change
@@ -60,6 +65,8 @@ export const Profile: React.FC = () => {
         },
       });
       setPhotos(user.photos || []);
+      setVerificationStatus(user.verificationStatus || 'unverified');
+      setVerificationPhotoUrl(user.verificationPhotoUrl || null);
       setPreferences({
         ageRange: {
           min: user.preferences?.ageRange?.min || 18,
@@ -70,6 +77,63 @@ export const Profile: React.FC = () => {
       });
     }
   }, [user]);
+
+  useEffect(() => {
+    // Récupérer le statut depuis l'API (au cas où le store n'est pas à jour)
+    const loadStatus = async () => {
+      try {
+        const status = await userService.getVerificationStatus();
+        setVerificationStatus(status.verificationStatus || 'unverified');
+        setVerificationPhotoUrl(status.verificationPhotoUrl || null);
+        // Mettre à jour le store si nécessaire
+        if (user && (user.verificationStatus !== status.verificationStatus || user.verificationPhotoUrl !== status.verificationPhotoUrl || user.verified !== status.verified)) {
+          updateUser({
+            ...user,
+            verificationStatus: status.verificationStatus,
+            verificationPhotoUrl: status.verificationPhotoUrl,
+            verifiedAt: status.verifiedAt,
+            verified: status.verified,
+          });
+        }
+      } catch (_e) {
+        // silencieux
+      }
+    };
+    if (user?.id) loadStatus();
+  }, [user?.id]);
+
+  const uploadVerificationSelfie = async (file: File) => {
+    try {
+      setIsUploadingVerification(true);
+      const result = await userService.uploadVerificationSelfie(file);
+      setVerificationPhotoUrl(result.url);
+      setVerificationStatus(result.user.verificationStatus || 'unverified');
+      updateUser(result.user);
+      toast.success('Selfie ajouté. Vous pouvez soumettre la vérification.');
+    } catch (error: any) {
+      console.error('Verification selfie upload error:', error);
+      toast.error(error.response?.data?.message || 'Erreur lors de l’upload du selfie');
+    } finally {
+      setIsUploadingVerification(false);
+      if (verificationFileInputRef.current) verificationFileInputRef.current.value = '';
+    }
+  };
+
+  const submitVerification = async () => {
+    try {
+      setIsSubmittingVerification(true);
+      const result = await userService.submitVerification();
+      setVerificationStatus(result.user.verificationStatus || 'pending');
+      setVerificationPhotoUrl(result.user.verificationPhotoUrl || verificationPhotoUrl);
+      updateUser(result.user);
+      toast.success('Demande de vérification envoyée');
+    } catch (error: any) {
+      console.error('Submit verification error:', error);
+      toast.error(error.response?.data?.message || 'Erreur lors de la soumission');
+    } finally {
+      setIsSubmittingVerification(false);
+    }
+  };
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -203,6 +267,11 @@ export const Profile: React.FC = () => {
               {subscription && subscription.isActive && (
                 <SubscriptionBadge type={subscription.type} size="md" />
               )}
+              {(user.verified || verificationStatus === 'verified') && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-green-600 text-white border border-white/40 shadow-sm">
+                  <span className="mr-1">✓</span> Vérifié
+                </span>
+              )}
             </div>
             {formData.dateOfBirth && (
               <p className="text-lg text-white text-opacity-90 mb-2">
@@ -286,6 +355,116 @@ export const Profile: React.FC = () => {
           onChange={handlePhotoUpload}
           className="hidden"
         />
+
+        {/* Input file pour selfie vérification (caché) */}
+        <input
+          ref={verificationFileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            if (file.size > 5 * 1024 * 1024) {
+              toast.error("L'image doit faire moins de 5MB");
+              return;
+            }
+            uploadVerificationSelfie(file);
+          }}
+          className="hidden"
+        />
+      </div>
+
+      {/* Vérification profil (MVP) */}
+      <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Vérification du profil</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Ajoutez un selfie pour obtenir le badge “Vérifié”.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${
+                verificationStatus === 'verified'
+                  ? 'bg-green-50 text-green-700 border-green-200'
+                  : verificationStatus === 'pending'
+                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                    : verificationStatus === 'rejected'
+                      ? 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-gray-50 text-gray-700 border-gray-200'
+              }`}
+            >
+              {verificationStatus === 'verified'
+                ? 'Vérifié'
+                : verificationStatus === 'pending'
+                  ? 'En attente'
+                  : verificationStatus === 'rejected'
+                    ? 'Refusé'
+                    : 'Non vérifié'}
+            </span>
+          </div>
+        </div>
+
+        {(verificationStatus !== 'verified' && !user.verified) && (
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-gray-200 p-4">
+              <p className="text-sm font-semibold text-gray-900 mb-2">Selfie</p>
+              {verificationPhotoUrl ? (
+                <div className="flex items-center gap-3">
+                  <img
+                    src={verificationPhotoUrl.startsWith('http')
+                      ? verificationPhotoUrl
+                      : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${verificationPhotoUrl}`}
+                    alt="Selfie de vérification"
+                    className="w-16 h-16 rounded-xl object-cover border border-gray-200"
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-600">Selfie prêt.</p>
+                    <button
+                      type="button"
+                      onClick={() => verificationFileInputRef.current?.click()}
+                      className="text-sm font-semibold text-[#F26E27] hover:underline"
+                      disabled={isUploadingVerification}
+                    >
+                      Remplacer
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => verificationFileInputRef.current?.click()}
+                  disabled={isUploadingVerification}
+                  className="w-full flex items-center justify-center"
+                >
+                  <IoCamera className="mr-2" size={18} />
+                  {isUploadingVerification ? 'Upload en cours…' : 'Uploader un selfie'}
+                </Button>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4">
+              <p className="text-sm font-semibold text-gray-900 mb-2">Soumission</p>
+              <p className="text-sm text-gray-600 mb-3">
+                Après upload, envoyez la demande. (MVP : validation manuelle/automatique à ajouter plus tard)
+              </p>
+              <Button
+                variant="primary"
+                onClick={submitVerification}
+                disabled={isSubmittingVerification || !verificationPhotoUrl || verificationStatus === 'pending'}
+                className="w-full flex items-center justify-center"
+              >
+                <IoCheckmark className="mr-2" size={18} />
+                {verificationStatus === 'pending'
+                  ? 'Déjà soumis'
+                  : isSubmittingVerification
+                    ? 'Envoi…'
+                    : 'Soumettre'}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">

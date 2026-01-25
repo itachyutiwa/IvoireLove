@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { analyzeMessageContent } from '../services/safetyEngine.js';
 
 const messageSchema = new mongoose.Schema(
   {
@@ -49,6 +50,17 @@ const messageSchema = new mongoose.Schema(
       type: String,
       index: true,
     },
+    riskScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+      index: true,
+    },
+    riskFlags: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,
@@ -81,7 +93,7 @@ export const Message = mongoose.model('Message', messageSchema);
 export const Conversation = mongoose.model('Conversation', conversationSchema);
 
 export const MessageModel = {
-  async create(senderId, receiverId, content, type = 'text', imageUrl = null) {
+  async create(senderId, receiverId, content, type = 'text', imageUrl = null, options = {}) {
     // Vérifier que MongoDB est connecté
     if (mongoose.connection.readyState !== 1) {
       throw new Error('MongoDB n\'est pas connecté. Veuillez démarrer MongoDB.');
@@ -115,6 +127,26 @@ export const MessageModel = {
       messageData.imageUrl = imageUrl;
     }
 
+    // Safety (si non fourni, analyser les messages texte/caption)
+    let riskScore = 0;
+    let riskFlags = [];
+    if (typeof options?.riskScore === 'number' || Array.isArray(options?.riskFlags)) {
+      riskScore = typeof options.riskScore === 'number' ? options.riskScore : 0;
+      riskFlags = Array.isArray(options.riskFlags) ? options.riskFlags : [];
+    } else if (type === 'text' && content) {
+      const analysis = analyzeMessageContent(content);
+      riskScore = analysis.riskScore;
+      riskFlags = analysis.riskFlags;
+    } else if (type === 'image' && content) {
+      // Caption image
+      const analysis = analyzeMessageContent(content);
+      riskScore = analysis.riskScore;
+      riskFlags = analysis.riskFlags;
+    }
+
+    messageData.riskScore = riskScore;
+    messageData.riskFlags = riskFlags;
+
     const message = await Message.create(messageData);
 
     // Mettre à jour la conversation
@@ -135,6 +167,8 @@ export const MessageModel = {
       imageUrl: message.imageUrl || null,
       timestamp: message.createdAt.toISOString(),
       read: false,
+      riskScore: message.riskScore || 0,
+      riskFlags: message.riskFlags || [],
     };
   },
 
@@ -176,6 +210,8 @@ export const MessageModel = {
               deletedForEveryone: conv.lastMessage.deletedForEveryone === true,
               deletedAt: conv.lastMessage.deletedAt ? conv.lastMessage.deletedAt.toISOString() : undefined,
               deletedBy: conv.lastMessage.deletedBy || undefined,
+              riskScore: conv.lastMessage.riskScore || 0,
+              riskFlags: conv.lastMessage.riskFlags || [],
             }
           : undefined,
         unreadCount,
@@ -207,6 +243,8 @@ export const MessageModel = {
       deletedForEveryone: msg.deletedForEveryone === true,
       deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : undefined,
       deletedBy: msg.deletedBy || undefined,
+      riskScore: msg.riskScore || 0,
+      riskFlags: msg.riskFlags || [],
     }));
   },
 

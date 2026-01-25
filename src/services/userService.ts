@@ -28,6 +28,37 @@ class UserService {
     await api.delete('/users/photos', { data: { photoUrl } });
   }
 
+  async uploadVerificationSelfie(file: File): Promise<{ url: string; user: User }> {
+    const formData = new FormData();
+    formData.append('photo', file);
+    const response = await api.post<{ url: string; user: User }>('/users/verification/selfie', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  async submitVerification(): Promise<{ message: string; user: User }> {
+    const response = await api.post<{ message: string; user: User }>('/users/verification/submit');
+    return response.data;
+  }
+
+  async getVerificationStatus(): Promise<{
+    verificationStatus: string;
+    verificationPhotoUrl: string | null;
+    verifiedAt: string | null;
+    verified: boolean;
+  }> {
+    const response = await api.get<{
+      verificationStatus: string;
+      verificationPhotoUrl: string | null;
+      verifiedAt: string | null;
+      verified: boolean;
+    }>('/users/verification/status');
+    return response.data;
+  }
+
   async getDiscoveries(filters?: {
     ageMin?: number;
     ageMax?: number;
