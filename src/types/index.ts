@@ -96,8 +96,9 @@ export interface Message {
   senderId: string;
   receiverId: string;
   content: string;
-  type?: 'text' | 'image' | 'audio';
+  type?: 'text' | 'image' | 'audio' | 'video';
   imageUrl?: string;
+  videoUrl?: string | null;
   voiceUrl?: string | null;
   replyToMessageId?: string | null;
   reactions?: Record<string, string[]>;

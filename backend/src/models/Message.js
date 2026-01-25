@@ -25,10 +25,13 @@ const messageSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['text', 'image', 'audio'],
+      enum: ['text', 'image', 'audio', 'video'],
       default: 'text',
     },
     imageUrl: {
+      type: String,
+    },
+    videoUrl: {
       type: String,
     },
     voiceUrl: {
@@ -139,6 +142,10 @@ export const MessageModel = {
       messageData.imageUrl = imageUrl;
     }
 
+    if (options?.videoUrl) {
+      messageData.videoUrl = options.videoUrl;
+    }
+
     if (options?.voiceUrl) {
       messageData.voiceUrl = options.voiceUrl;
     }
@@ -185,6 +192,7 @@ export const MessageModel = {
       content: message.content || '',
       type: message.type || 'text',
       imageUrl: message.imageUrl || null,
+      videoUrl: message.videoUrl || null,
       voiceUrl: message.voiceUrl || null,
       replyToMessageId: message.replyToMessageId || null,
       reactions: message.reactions ? Object.fromEntries(message.reactions) : {},
@@ -228,6 +236,7 @@ export const MessageModel = {
               content: conv.lastMessage.content || '',
               type: conv.lastMessage.type || 'text',
               imageUrl: conv.lastMessage.imageUrl,
+              videoUrl: conv.lastMessage.videoUrl || null,
               voiceUrl: conv.lastMessage.voiceUrl || null,
               replyToMessageId: conv.lastMessage.replyToMessageId || null,
               reactions: conv.lastMessage.reactions ? Object.fromEntries(conv.lastMessage.reactions) : {},
@@ -263,6 +272,7 @@ export const MessageModel = {
       content: msg.content || '',
       type: msg.type || 'text',
       imageUrl: msg.imageUrl,
+      videoUrl: msg.videoUrl || null,
       voiceUrl: msg.voiceUrl || null,
       replyToMessageId: msg.replyToMessageId || null,
       reactions: msg.reactions ? Object.fromEntries(msg.reactions) : {},

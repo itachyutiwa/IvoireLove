@@ -11,7 +11,7 @@ import { MessagingMenu } from '@/components/contact/MessagingMenu';
 import { Modal } from '@/components/ui/Modal';
 import { formatRelativeTime } from '@/utils/helpers';
 import { User } from '@/types';
-import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown, IoEllipsisVertical, IoMic } from 'react-icons/io5';
+import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown, IoEllipsisVertical, IoMic, IoCamera } from 'react-icons/io5';
 import { LocationMessage } from '@/components/chat/LocationMessage';
 import toast from 'react-hot-toast';
 
@@ -47,6 +47,17 @@ export const Messages: React.FC = () => {
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [previewVoice, setPreviewVoice] = useState<string | null>(null);
   const voiceInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [previewVideo, setPreviewVideo] = useState<string | null>(null);
+  const [showCameraModal, setShowCameraModal] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
+  const [cameraMode, setCameraMode] = useState<'photo' | 'video'>('photo');
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraRecorderRef = useRef<MediaRecorder | null>(null);
+  const cameraChunksRef = useRef<Blob[]>([]);
+  const [isRecordingVideo, setIsRecordingVideo] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -344,7 +355,7 @@ export const Messages: React.FC = () => {
   };
 
   const handleSendMessage = async () => {
-    if ((!messageText.trim() && !previewImage && !previewVoice) || !selectedConversationId || !user) return;
+    if ((!messageText.trim() && !previewImage && !previewVideo && !previewVoice) || !selectedConversationId || !user) return;
 
     // Trouver la conversation
     const conversation = conversations.find((c) => c.id === selectedConversationId);
@@ -378,6 +389,12 @@ export const Messages: React.FC = () => {
           replyToMessageId: replyToMessage?.id,
         });
         setPreviewImage(null);
+      } else if (previewVideo) {
+        sentMessage = await messageService.sendMessage(receiverId, messageText || 'Vidéo', 'video', undefined, {
+          videoUrl: previewVideo,
+          replyToMessageId: replyToMessage?.id,
+        });
+        setPreviewVideo(null);
       } else if (previewVoice) {
         sentMessage = await messageService.sendMessage(receiverId, messageText || 'Message vocal', 'audio', undefined, {
           voiceUrl: previewVoice,
@@ -486,6 +503,139 @@ export const Messages: React.FC = () => {
     }
   };
 
+  const stopCameraStream = () => {
+    try {
+      if (cameraRecorderRef.current && cameraRecorderRef.current.state !== 'inactive') {
+        cameraRecorderRef.current.stop();
+      }
+    } catch (_e) {
+      // ignore
+    }
+    cameraRecorderRef.current = null;
+    cameraChunksRef.current = [];
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+    }
+    setIsCameraReady(false);
+    setIsRecordingVideo(false);
+  };
+
+  const startCameraStream = async (facing: 'user' | 'environment') => {
+    try {
+      stopCameraStream();
+      setIsCameraReady(false);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing },
+        audio: cameraMode === 'video',
+      });
+      cameraStreamRef.current = stream;
+      const videoEl = cameraVideoRef.current;
+      if (videoEl) {
+        videoEl.srcObject = stream;
+        await videoEl.play();
+      }
+      setIsCameraReady(true);
+    } catch (_e) {
+      toast.error("Impossible d'accéder à la caméra (permission refusée ?)");
+      stopCameraStream();
+    }
+  };
+
+  useEffect(() => {
+    if (!showCameraModal) {
+      stopCameraStream();
+      return;
+    }
+    startCameraStream(cameraFacing);
+    return () => stopCameraStream();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCameraModal, cameraFacing, cameraMode]);
+
+  const capturePhotoFromCamera = async () => {
+    try {
+      const videoEl = cameraVideoRef.current;
+      if (!videoEl) return;
+      const w = videoEl.videoWidth;
+      const h = videoEl.videoHeight;
+      if (!w || !h) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(videoEl, 0, 0, w, h);
+
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      if (!blob) return;
+
+      setUploadingImage(true);
+      const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const imageUrl = await messageService.uploadMessagePhoto(file);
+      const fullUrl = imageUrl.startsWith('http')
+        ? imageUrl
+        : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${imageUrl}`;
+      setPreviewImage(fullUrl);
+      setShowCameraModal(false);
+      toast.success('Photo prise');
+    } catch (_e) {
+      toast.error("Erreur lors de la capture");
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const startVideoRecordingFromCamera = () => {
+    if (isRecordingVideo) return;
+    const stream = cameraStreamRef.current;
+    if (!stream) return;
+    cameraChunksRef.current = [];
+    try {
+      const recorder = new MediaRecorder(stream);
+      cameraRecorderRef.current = recorder;
+      recorder.ondataavailable = (evt: BlobEvent) => {
+        if (evt.data && evt.data.size > 0) cameraChunksRef.current.push(evt.data);
+      };
+      recorder.onstop = async () => {
+        try {
+          const blob = new Blob(cameraChunksRef.current, { type: recorder.mimeType || 'video/webm' });
+          if (blob.size < 2048) return;
+          setUploadingVideo(true);
+          const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
+          const url = await messageService.uploadVideo(file);
+          const fullUrl = url.startsWith('http')
+            ? url
+            : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${url}`;
+          setPreviewVideo(fullUrl);
+          setShowCameraModal(false);
+          toast.success('Vidéo prête');
+        } catch (err: any) {
+          toast.error(err?.response?.data?.message || "Erreur lors de l'upload vidéo");
+        } finally {
+          setUploadingVideo(false);
+        }
+      };
+      recorder.start();
+      setIsRecordingVideo(true);
+    } catch (_e) {
+      toast.error("Impossible d'enregistrer la vidéo");
+      setIsRecordingVideo(false);
+    }
+  };
+
+  const stopVideoRecordingFromCamera = () => {
+    if (!isRecordingVideo) return;
+    setIsRecordingVideo(false);
+    try {
+      if (cameraRecorderRef.current && cameraRecorderRef.current.state !== 'inactive') {
+        cameraRecorderRef.current.stop();
+      }
+    } catch (_e) {
+      // ignore
+    }
+  };
+
   const stopRecordingTimer = () => {
     if (recordingTimerRef.current) {
       window.clearInterval(recordingTimerRef.current);
@@ -512,7 +662,7 @@ export const Messages: React.FC = () => {
     // Empêcher les enregistrements multiples
     if (isRecording || uploadingVoice) return;
     // Si un audio est déjà en preview, on ne redémarre pas tant qu'il n'est pas supprimé/envoyé
-    if (previewVoice) return;
+    if (previewVoice || previewImage || previewVideo) return;
 
     try {
       setRecordingSeconds(0);
@@ -972,6 +1122,7 @@ export const Messages: React.FC = () => {
                     
                     const isOwn = message.senderId === user?.id;
                     const isImage = message.type === 'image' && message.imageUrl;
+                    const isVideo = message.type === 'video' && message.videoUrl;
                     const isAudio = message.type === 'audio' && message.voiceUrl;
                     const canDeleteForAll =
                       isOwn &&
@@ -1213,6 +1364,49 @@ export const Messages: React.FC = () => {
                                 </p>
                               )}
                             </>
+                          ) : isVideo ? (
+                            <>
+                              {repliedMessage && (
+                                <div className={`mb-2 px-3 py-2 rounded-lg ${isOwn ? 'bg-primary-700/40' : 'bg-gray-100'} border-l-4 ${isOwn ? 'border-white/70' : 'border-[#F26E27]'}`}>
+                                  <p className={`text-xs font-semibold ${isOwn ? 'text-primary-100' : 'text-gray-700'}`}>
+                                    Réponse
+                                  </p>
+                                  <p className={`text-xs ${isOwn ? 'text-primary-100/90' : 'text-gray-600'} truncate`}>
+                                    {repliedMessage.type === 'image'
+                                      ? '📷 Photo'
+                                      : repliedMessage.type === 'audio'
+                                        ? '🎤 Audio'
+                                        : repliedMessage.type === 'video'
+                                          ? '🎬 Vidéo'
+                                          : (repliedMessage.content || '')}
+                                  </p>
+                                </div>
+                              )}
+                              <video
+                                controls
+                                src={(() => {
+                                  const v = message.videoUrl || '';
+                                  return v.startsWith('http')
+                                    ? v
+                                    : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${v}`;
+                                })()}
+                                className="w-72 max-w-full rounded-lg bg-black"
+                              />
+                              {message.content && message.content !== 'Vidéo' && (
+                                <p className="mt-2">{message.content}</p>
+                              )}
+                              {message.timestamp && (
+                                <p
+                                  className={`text-xs mt-1 flex items-center ${
+                                    isOwn ? 'text-primary-100' : 'text-gray-500'
+                                  }`}
+                                >
+                                  <span>{formatRelativeTime(message.timestamp)}</span>
+                                  {isOwn && message.read && <span className="ml-1" title="Lu">✓✓</span>}
+                                  {isOwn && !message.read && <span className="ml-1 text-primary-200" title="Envoyé">✓</span>}
+                                </p>
+                              )}
+                            </>
                           ) : isAudio ? (
                             <>
                               {repliedMessage && (
@@ -1381,6 +1575,22 @@ export const Messages: React.FC = () => {
                 </div>
               )}
 
+              {/* Aperçu vidéo */}
+              {previewVideo && (
+                <div className="mb-3">
+                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50">
+                    <video controls src={previewVideo} className="w-full max-h-48 rounded-lg bg-black" />
+                    <button
+                      onClick={() => setPreviewVideo(null)}
+                      className="p-2 bg-[#F26E27] text-white rounded-lg hover:bg-[#c2581f] transition-colors"
+                      title="Supprimer la vidéo"
+                    >
+                      <IoClose size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center space-x-2">
                 <input
                   ref={fileInputRef}
@@ -1413,10 +1623,42 @@ export const Messages: React.FC = () => {
                         type="button"
                         onClick={() => {
                           setShowAttachMenu(false);
+                          setCameraMode('photo');
+                          setShowCameraModal(true);
+                        }}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors"
+                      >
+                        <IoCamera size={20} className="text-gray-700" />
+                        <div className="text-left">
+                          <p className="text-sm font-semibold text-gray-900">Caméra</p>
+                          <p className="text-xs text-gray-500">Prendre une photo (selfie/face arrière)</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAttachMenu(false);
+                          setCameraMode('video');
+                          setShowCameraModal(true);
+                        }}
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors border-t border-gray-100"
+                      >
+                        <IoCamera size={20} className="text-gray-700" />
+                        <div className="text-left">
+                          <p className="text-sm font-semibold text-gray-900">Vidéo</p>
+                          <p className="text-xs text-gray-500">Enregistrer une vidéo</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAttachMenu(false);
                           fileInputRef.current?.click();
                         }}
                         disabled={uploadingImage}
-                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors border-t border-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {uploadingImage ? (
                           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-600"></div>
@@ -1456,7 +1698,7 @@ export const Messages: React.FC = () => {
                       handleSendMessage();
                     }
                   }}
-                  placeholder={previewImage || previewVoice ? "Ajouter un message (optionnel)..." : "Tapez un message..."}
+                  placeholder={previewImage || previewVideo || previewVoice ? "Ajouter un message (optionnel)..." : "Tapez un message..."}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
 
@@ -1479,7 +1721,7 @@ export const Messages: React.FC = () => {
                     e.preventDefault();
                     stopRecording();
                   }}
-                  disabled={uploadingVoice || uploadingImage || !!previewVoice}
+                  disabled={uploadingVoice || uploadingVideo || uploadingImage || !!previewVoice || !!previewVideo}
                   className={`p-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     isRecording ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
@@ -1495,7 +1737,7 @@ export const Messages: React.FC = () => {
 
                 <button
                   onClick={handleSendMessage}
-                  disabled={isRecording || (!messageText.trim() && !previewImage && !previewVoice) || uploadingImage || uploadingVoice}
+                  disabled={isRecording || (!messageText.trim() && !previewImage && !previewVideo && !previewVoice) || uploadingImage || uploadingVideo || uploadingVoice}
                   className="p-3 bg-[#F26E27] text-white rounded-lg hover:bg-[#c2581f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <IoPaperPlane size={20} />
@@ -1574,6 +1816,77 @@ export const Messages: React.FC = () => {
             >
               {isSubmittingReport ? 'Envoi…' : 'Envoyer'}
             </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal caméra (selfie / face arrière + photo / vidéo) */}
+      <Modal
+        isOpen={showCameraModal}
+        onClose={() => setShowCameraModal(false)}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">
+                {cameraMode === 'photo' ? 'Caméra' : 'Vidéo'}
+              </h3>
+              <p className="text-sm text-gray-600">
+                {cameraMode === 'photo'
+                  ? 'Prévisualisez puis prenez une photo.'
+                  : 'Démarrez puis arrêtez l’enregistrement.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCameraFacing((p) => (p === 'user' ? 'environment' : 'user'))}
+              className="px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 font-semibold"
+              title="Retourner la caméra"
+            >
+              {cameraFacing === 'user' ? 'Selfie' : 'Face arrière'}
+            </button>
+          </div>
+
+          <div className="rounded-xl overflow-hidden bg-black">
+            <video
+              ref={cameraVideoRef}
+              playsInline
+              muted
+              className="w-full max-h-[60vh] object-cover"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCameraModal(false)}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 font-semibold"
+            >
+              Fermer
+            </button>
+
+            {cameraMode === 'photo' ? (
+              <button
+                type="button"
+                onClick={capturePhotoFromCamera}
+                disabled={!isCameraReady || uploadingImage}
+                className="px-4 py-2 rounded-lg bg-[#F26E27] text-white hover:bg-[#c2581f] font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {uploadingImage ? 'Upload…' : 'Prendre la photo'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => (isRecordingVideo ? stopVideoRecordingFromCamera() : startVideoRecordingFromCamera())}
+                disabled={!isCameraReady || uploadingVideo}
+                className={`px-4 py-2 rounded-lg font-semibold disabled:opacity-60 disabled:cursor-not-allowed ${
+                  isRecordingVideo ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-[#12C43F] text-white hover:bg-green-700'
+                }`}
+              >
+                {uploadingVideo ? 'Upload…' : isRecordingVideo ? 'Arrêter' : 'Enregistrer'}
+              </button>
+            )}
           </div>
         </div>
       </Modal>

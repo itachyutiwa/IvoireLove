@@ -62,7 +62,7 @@ export const setupSocket = (io) => {
     });
 
     // Envoyer un message
-    socket.on('message:send', async ({ receiverId, content, type, imageUrl, voiceUrl, replyToMessageId }) => {
+    socket.on('message:send', async ({ receiverId, content, type, imageUrl, voiceUrl, videoUrl, replyToMessageId }) => {
       try {
         // Vérifier les limites (sauf en développement où tout est illimité)
         if (process.env.NODE_ENV !== 'development') {
@@ -87,6 +87,10 @@ export const setupSocket = (io) => {
         const msgType = type || 'text';
         if (msgType === 'audio' && !voiceUrl) {
           socket.emit('message:error', { message: 'Fichier audio requis' });
+          return;
+        }
+        if (msgType === 'video' && !videoUrl) {
+          socket.emit('message:error', { message: 'Fichier vidéo requis' });
           return;
         }
         const analysis =
@@ -114,6 +118,7 @@ export const setupSocket = (io) => {
             riskScore: analysis.riskScore,
             riskFlags: analysis.riskFlags,
             voiceUrl: voiceUrl || null,
+            videoUrl: videoUrl || null,
             replyToMessageId: replyToMessageId || null,
           }
         );

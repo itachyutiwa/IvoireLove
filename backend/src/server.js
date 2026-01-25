@@ -121,6 +121,7 @@ const startServer = async () => {
     const messagesUploadDir = path.join(uploadDir, 'messages');
     const verificationUploadDir = path.join(uploadDir, 'verification');
     const voiceUploadDir = path.join(uploadDir, 'voice');
+    const videoUploadDir = path.join(uploadDir, 'video');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -132,6 +133,9 @@ const startServer = async () => {
     }
     if (!fs.existsSync(voiceUploadDir)) {
       fs.mkdirSync(voiceUploadDir, { recursive: true });
+    }
+    if (!fs.existsSync(videoUploadDir)) {
+      fs.mkdirSync(videoUploadDir, { recursive: true });
     }
 
     // Démarrer le serveur
