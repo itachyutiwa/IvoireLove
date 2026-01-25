@@ -25,11 +25,23 @@ const messageSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['text', 'image'],
+      enum: ['text', 'image', 'audio'],
       default: 'text',
     },
     imageUrl: {
       type: String,
+    },
+    voiceUrl: {
+      type: String,
+    },
+    replyToMessageId: {
+      type: String,
+      index: true,
+    },
+    reactions: {
+      type: Map,
+      of: [String],
+      default: new Map(),
     },
     read: {
       type: Boolean,
@@ -127,6 +139,14 @@ export const MessageModel = {
       messageData.imageUrl = imageUrl;
     }
 
+    if (options?.voiceUrl) {
+      messageData.voiceUrl = options.voiceUrl;
+    }
+
+    if (options?.replyToMessageId) {
+      messageData.replyToMessageId = options.replyToMessageId;
+    }
+
     // Safety (si non fourni, analyser les messages texte/caption)
     let riskScore = 0;
     let riskFlags = [];
@@ -165,6 +185,9 @@ export const MessageModel = {
       content: message.content || '',
       type: message.type || 'text',
       imageUrl: message.imageUrl || null,
+      voiceUrl: message.voiceUrl || null,
+      replyToMessageId: message.replyToMessageId || null,
+      reactions: message.reactions ? Object.fromEntries(message.reactions) : {},
       timestamp: message.createdAt.toISOString(),
       read: false,
       riskScore: message.riskScore || 0,
@@ -205,6 +228,9 @@ export const MessageModel = {
               content: conv.lastMessage.content || '',
               type: conv.lastMessage.type || 'text',
               imageUrl: conv.lastMessage.imageUrl,
+              voiceUrl: conv.lastMessage.voiceUrl || null,
+              replyToMessageId: conv.lastMessage.replyToMessageId || null,
+              reactions: conv.lastMessage.reactions ? Object.fromEntries(conv.lastMessage.reactions) : {},
               timestamp: conv.lastMessage.createdAt.toISOString(),
               read: conv.lastMessage.read,
               deletedForEveryone: conv.lastMessage.deletedForEveryone === true,
@@ -237,6 +263,9 @@ export const MessageModel = {
       content: msg.content || '',
       type: msg.type || 'text',
       imageUrl: msg.imageUrl,
+      voiceUrl: msg.voiceUrl || null,
+      replyToMessageId: msg.replyToMessageId || null,
+      reactions: msg.reactions ? Object.fromEntries(msg.reactions) : {},
       timestamp: msg.createdAt.toISOString(),
       read: msg.read,
       readAt: msg.readAt?.toISOString(),
@@ -246,6 +275,50 @@ export const MessageModel = {
       riskScore: msg.riskScore || 0,
       riskFlags: msg.riskFlags || [],
     }));
+  },
+
+  async toggleReaction(messageId, userId, emoji) {
+    if (mongoose.connection.readyState !== 1) {
+      throw new Error('MongoDB n\'est pas connecté. Veuillez démarrer MongoDB.');
+    }
+    if (!emoji || typeof emoji !== 'string') {
+      throw new Error('Emoji requis');
+    }
+
+    const msg = await Message.findById(messageId);
+    if (!msg) {
+      const err = new Error('Message introuvable');
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    if (msg.senderId !== userId && msg.receiverId !== userId) {
+      const err = new Error('Action non autorisée');
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+    if (msg.deletedForEveryone === true) {
+      const err = new Error('Message supprimé');
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+
+    const reactionsMap = msg.reactions || new Map();
+    const current = reactionsMap.get(emoji) || [];
+    const has = current.includes(userId);
+    const next = has ? current.filter((id) => id !== userId) : [...current, userId];
+    if (next.length === 0) {
+      reactionsMap.delete(emoji);
+    } else {
+      reactionsMap.set(emoji, next);
+    }
+    msg.reactions = reactionsMap;
+    await msg.save();
+
+    return {
+      messageId: msg._id.toString(),
+      conversationId: msg.conversationId,
+      reactions: msg.reactions ? Object.fromEntries(msg.reactions) : {},
+    };
   },
 
   async markAsRead(conversationId, userId) {

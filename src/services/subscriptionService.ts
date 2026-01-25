@@ -1,5 +1,5 @@
 import { api } from './api';
-import { Subscription, SubscriptionPlan } from '@/types';
+import { Subscription, SubscriptionPlan, LikeReceived } from '@/types';
 
 class SubscriptionService {
   async getPlans(): Promise<SubscriptionPlan[]> {
@@ -27,6 +27,16 @@ class SubscriptionService {
     const response = await api.get<{ canSend: boolean; remaining: number }>(
       '/subscriptions/check-limit'
     );
+    return response.data;
+  }
+
+  async boost(): Promise<{ boostedUntil: string | null; durationMinutes: number }> {
+    const response = await api.post<{ boostedUntil: string | null; durationMinutes: number }>('/subscriptions/boost');
+    return response.data;
+  }
+
+  async getLikesReceived(): Promise<LikeReceived[]> {
+    const response = await api.get<LikeReceived[]>('/subscriptions/likes-received');
     return response.data;
   }
 }

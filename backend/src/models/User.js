@@ -34,6 +34,15 @@ export const createUserTable = async (pool) => {
       privacy_hide_online BOOLEAN DEFAULT FALSE,
       privacy_incognito BOOLEAN DEFAULT FALSE,
       privacy_share_phone VARCHAR(30) DEFAULT 'afterMatch',
+      boosted_until TIMESTAMP,
+      travel_mode_enabled BOOLEAN DEFAULT FALSE,
+      travel_mode_country VARCHAR(100),
+      travel_mode_region VARCHAR(100),
+      travel_mode_city VARCHAR(100),
+      travel_mode_commune VARCHAR(100),
+      travel_mode_quartier VARCHAR(100),
+      travel_mode_lat DECIMAL(10, 8),
+      travel_mode_lng DECIMAL(11, 8),
       device_id VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -127,6 +136,48 @@ export const createUserTable = async (pool) => {
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_name='users' AND column_name='privacy_share_phone') THEN
             ALTER TABLE users ADD COLUMN privacy_share_phone VARCHAR(30) DEFAULT 'afterMatch';
+          END IF;
+
+          -- Ajouter boosted_until si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='boosted_until') THEN
+            ALTER TABLE users ADD COLUMN boosted_until TIMESTAMP;
+          END IF;
+
+          -- Ajouter travel_mode_enabled si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_enabled') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_enabled BOOLEAN DEFAULT FALSE;
+          END IF;
+
+          -- Ajouter travel_mode_* si elles n'existent pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_country') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_country VARCHAR(100);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_region') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_region VARCHAR(100);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_city') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_city VARCHAR(100);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_commune') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_commune VARCHAR(100);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_quartier') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_quartier VARCHAR(100);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_lat') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_lat DECIMAL(10, 8);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='travel_mode_lng') THEN
+            ALTER TABLE users ADD COLUMN travel_mode_lng DECIMAL(11, 8);
           END IF;
         END $$;
       `);
@@ -318,6 +369,8 @@ export const UserModel = {
       location: null, // Géré séparément
       preferences: null, // Géré séparément
       privacy: null, // Géré séparément
+      boostedUntil: 'boosted_until',
+      travelMode: null, // Géré séparément
     };
 
     const fields = [];
@@ -375,6 +428,35 @@ export const UserModel = {
         fields.push(`privacy_share_phone = $${paramCount}`);
         values.push(updates.privacy.sharePhone || 'afterMatch');
         paramCount++;
+      } else if (key === 'travelMode' && updates.travelMode) {
+        fields.push(`travel_mode_enabled = $${paramCount}`);
+        values.push(updates.travelMode.enabled === true);
+        paramCount++;
+
+        const loc = updates.travelMode.location || {};
+        fields.push(`travel_mode_country = $${paramCount}`);
+        values.push(loc.country || null);
+        paramCount++;
+        fields.push(`travel_mode_region = $${paramCount}`);
+        values.push(loc.region || null);
+        paramCount++;
+        fields.push(`travel_mode_city = $${paramCount}`);
+        values.push(loc.city || null);
+        paramCount++;
+        fields.push(`travel_mode_commune = $${paramCount}`);
+        values.push(loc.commune || null);
+        paramCount++;
+        fields.push(`travel_mode_quartier = $${paramCount}`);
+        values.push(loc.quartier || null);
+        paramCount++;
+        if (loc.coordinates) {
+          fields.push(`travel_mode_lat = $${paramCount}`);
+          values.push(loc.coordinates.lat || null);
+          paramCount++;
+          fields.push(`travel_mode_lng = $${paramCount}`);
+          values.push(loc.coordinates.lng || null);
+          paramCount++;
+        }
       } else if (fieldMap[key]) {
         const dbKey = fieldMap[key];
         fields.push(`${dbKey} = $${paramCount}`);
@@ -505,14 +587,14 @@ export const UserModel = {
       query += ` AND location_lat IS NOT NULL AND location_lng IS NOT NULL`;
     }
 
-    // Ordre : en ligne d'abord, puis par distance si disponible, sinon par dernière activité
+    // Ordre : boost actif d'abord, puis en ligne, puis par distance si disponible, sinon par dernière activité
     // Limite augmentée à 100 pour la recherche avancée
     const limit = filters.limit || 50;
     params.push(limit);
     if (centerLat && centerLng) {
-      query += ` ORDER BY is_online DESC, distance_km ASC NULLS LAST, last_active DESC LIMIT $${paramCount}`;
+      query += ` ORDER BY (boosted_until IS NOT NULL AND boosted_until > CURRENT_TIMESTAMP) DESC, is_online DESC, distance_km ASC NULLS LAST, last_active DESC LIMIT $${paramCount}`;
     } else {
-      query += ` ORDER BY is_online DESC, last_active DESC LIMIT $${paramCount}`;
+      query += ` ORDER BY (boosted_until IS NOT NULL AND boosted_until > CURRENT_TIMESTAMP) DESC, is_online DESC, last_active DESC LIMIT $${paramCount}`;
     }
 
     const result = await pool.query(query, params);
@@ -589,6 +671,22 @@ export const UserModel = {
         hideOnline: row.privacy_hide_online === true,
         incognito: row.privacy_incognito === true,
         sharePhone: row.privacy_share_phone || 'afterMatch',
+      },
+      boostedUntil: row.boosted_until ? row.boosted_until.toISOString() : null,
+      travelMode: {
+        enabled: row.travel_mode_enabled === true,
+        location: row.travel_mode_enabled === true
+          ? {
+              country: row.travel_mode_country || null,
+              region: row.travel_mode_region || null,
+              city: row.travel_mode_city || null,
+              commune: row.travel_mode_commune || null,
+              quartier: row.travel_mode_quartier || null,
+              coordinates: row.travel_mode_lat
+                ? { lat: parseFloat(row.travel_mode_lat), lng: parseFloat(row.travel_mode_lng) }
+                : undefined,
+            }
+          : undefined,
       },
       createdAt: row.created_at.toISOString(),
       lastActive: row.last_active.toISOString(),

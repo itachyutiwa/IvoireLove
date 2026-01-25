@@ -9,14 +9,19 @@ import { Modal } from '@/components/ui/Modal';
 import { User, SwipeAction } from '@/types';
 import { IoSearch } from 'react-icons/io5';
 import toast from 'react-hot-toast';
+import { subscriptionService } from '@/services/subscriptionService';
+import { useSubscription } from '@/hooks/useSubscription';
+import { getEntitlements } from '@/utils/entitlements';
 
 export const Discover: React.FC = () => {
   const { user } = useAuthStore();
+  const { subscription } = useSubscription();
   const [profiles, setProfiles] = useState<User[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [searchFilters, setSearchFilters] = useState<any>({});
+  const [isBoosting, setIsBoosting] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -114,6 +119,23 @@ export const Discover: React.FC = () => {
     // Animation terminée, on peut nettoyer si nécessaire
   };
 
+  const handleBoost = async () => {
+    const ent = getEntitlements(subscription?.type);
+    if (!ent.canBoost) {
+      toast.error('Boost réservé aux abonnements Premium');
+      return;
+    }
+    try {
+      setIsBoosting(true);
+      const res = await subscriptionService.boost();
+      toast.success(`Boost activé (${res.durationMinutes} min)`);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erreur lors du boost');
+    } finally {
+      setIsBoosting(false);
+    }
+  };
+
 
   if (isLoading) {
     return (
@@ -155,7 +177,16 @@ export const Discover: React.FC = () => {
       <SubscriptionBanner />
 
       {/* Bouton de recherche/filtres */}
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={handleBoost}
+          disabled={isBoosting}
+          className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-[#F26E27] to-[#12C43F] text-white rounded-lg shadow-md hover:shadow-lg transition-shadow border-2 border-white/40 disabled:opacity-60 disabled:cursor-not-allowed"
+          title="Booster votre profil (Premium)"
+        >
+          <span className="font-semibold">{isBoosting ? 'Boost…' : 'Boost'}</span>
+        </button>
         <button
           onClick={() => setShowFilters(true)}
           className="flex items-center space-x-2 px-4 py-2 bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow border-2 border-primary-200"

@@ -7,12 +7,17 @@ import { Button } from '@/components/ui/Button';
 import { SUBSCRIPTION_PLANS } from '@/utils/constants';
 import { IoCheckmarkCircle, IoSparkles } from 'react-icons/io5';
 import toast from 'react-hot-toast';
+import { subscriptionService } from '@/services/subscriptionService';
+import { getEntitlements } from '@/utils/entitlements';
+import { LikeReceived } from '@/types';
 
 export const Subscription: React.FC = () => {
   const { loadPlans, purchaseSubscription } = useSubscriptionStore();
   const { subscription, isActive, timeRemaining } = useSubscription();
   const [showModal, setShowModal] = React.useState(false);
   const [selectedPlan, setSelectedPlan] = React.useState<string | null>(null);
+  const [likesReceived, setLikesReceived] = React.useState<LikeReceived[]>([]);
+  const [isLoadingLikes, setIsLoadingLikes] = React.useState(false);
 
   useEffect(() => {
     loadPlans();
@@ -31,6 +36,24 @@ export const Subscription: React.FC = () => {
       setShowModal(false);
     } catch (error: any) {
       toast.error('Erreur lors de l\'achat');
+    }
+  };
+
+  const loadLikesReceived = async () => {
+    if (!subscription) return;
+    const ent = getEntitlements(subscription.type);
+    if (!ent.canSeeLikes) {
+      toast.error('Fonction réservée au Pass VIP');
+      return;
+    }
+    try {
+      setIsLoadingLikes(true);
+      const data = await subscriptionService.getLikesReceived();
+      setLikesReceived(data || []);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erreur lors du chargement des likes');
+    } finally {
+      setIsLoadingLikes(false);
     }
   };
 
@@ -142,6 +165,53 @@ export const Subscription: React.FC = () => {
         onPurchase={handleModalPurchase}
         initialPlanType={selectedPlan}
       />
+
+      {/* Voir qui vous a liké (VIP) */}
+      {subscription && subscription.isActive && getEntitlements(subscription.type).canSeeLikes && (
+        <div className="mt-10 bg-white rounded-2xl shadow-lg p-6 border-2 border-primary-200">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Qui vous a liké</h2>
+              <p className="text-sm text-gray-600">Visible uniquement avec le Pass VIP.</p>
+            </div>
+            <Button variant="primary" onClick={loadLikesReceived} disabled={isLoadingLikes}>
+              {isLoadingLikes ? 'Chargement…' : 'Voir'}
+            </Button>
+          </div>
+
+          {likesReceived.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              {likesReceived.slice(0, 20).map((item) => {
+                const u = item.user;
+                const photo = u.photos?.[0]
+                  ? (u.photos[0].startsWith('http')
+                      ? u.photos[0]
+                      : `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${u.photos[0]}`)
+                  : null;
+                return (
+                  <div key={`${u.id}-${item.createdAt}`} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200">
+                    {photo ? (
+                      <img src={photo} className="w-12 h-12 rounded-full object-cover" alt={u.firstName} />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600">
+                        {(u.firstName || '?').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-gray-900 truncate">
+                        {u.firstName} {u.lastName}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {item.action === 'superlike' ? '⭐ Super Like' : '❤️ Like'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

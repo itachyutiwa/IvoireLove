@@ -85,6 +85,15 @@ const PAYMENT_NUMBERS = {
 
 export { PAYMENT_NUMBERS };
 
+const getEntitlements = (subscriptionType) => {
+  const isPremium = ['month', '3months', '6months', 'year'].includes(subscriptionType);
+  return {
+    canBoost: isPremium,
+    canTravelMode: isPremium,
+    canSeeLikes: subscriptionType === 'year',
+  };
+};
+
 // Obtenir les plans disponibles
 router.get('/plans', authenticateToken, async (req, res) => {
   res.json(SUBSCRIPTION_PLANS);
@@ -107,6 +116,131 @@ router.get('/current', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get current subscription error:', error);
     res.status(500).json({ message: 'Erreur lors de la récupération de l\'abonnement' });
+  }
+});
+
+// Activer un boost (MVP)
+router.post('/boost', authenticateToken, async (req, res) => {
+  try {
+    const subscription = await SubscriptionModel.findByUserId(pgPool, req.user.userId);
+    if (!subscription || subscription.isActive !== true) {
+      return res.status(403).json({ message: 'Abonnement requis' });
+    }
+
+    const entitlements = getEntitlements(subscription.type);
+    if (!entitlements.canBoost) {
+      return res.status(403).json({ message: 'Boost réservé aux abonnements Premium' });
+    }
+
+    // Boost 30 minutes (MVP)
+    const result = await pgPool.query(
+      `UPDATE users
+       SET boosted_until = CURRENT_TIMESTAMP + INTERVAL '30 minutes'
+       WHERE id = $1
+       RETURNING boosted_until`,
+      [req.user.userId]
+    );
+
+    res.json({
+      boostedUntil: result.rows[0]?.boosted_until ? result.rows[0].boosted_until.toISOString() : null,
+      durationMinutes: 30,
+    });
+  } catch (error) {
+    console.error('Boost error:', error);
+    res.status(500).json({ message: 'Erreur lors de l’activation du boost' });
+  }
+});
+
+// Voir qui vous a liké (Premium)
+router.get('/likes-received', authenticateToken, async (req, res) => {
+  try {
+    const subscription = await SubscriptionModel.findByUserId(pgPool, req.user.userId);
+    if (!subscription || subscription.isActive !== true) {
+      return res.status(403).json({ message: 'Abonnement requis' });
+    }
+
+    const entitlements = getEntitlements(subscription.type);
+    if (!entitlements.canSeeLikes) {
+      return res.status(403).json({ message: 'Fonction réservée au Pass VIP' });
+    }
+
+    const result = await pgPool.query(
+      `
+      SELECT s.user_id, s.action, s.created_at, u.*
+      FROM swipes s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.target_user_id = $1 AND s.action IN ('like','superlike')
+      ORDER BY s.created_at DESC
+      LIMIT 100
+      `,
+      [req.user.userId]
+    );
+
+    // On renvoie une version "light" (pas de password_hash de toute façon)
+    res.json(
+      result.rows.map((row) => ({
+        user: {
+          id: row.id,
+          email: row.email,
+          phone: null,
+          firstName: row.first_name,
+          lastName: row.last_name,
+          dateOfBirth: row.date_of_birth.toISOString().split('T')[0],
+          gender: row.gender,
+          bio: row.bio,
+          photos: row.photos || [],
+          location: {
+            city: row.location_city,
+            country: row.location_country,
+            region: row.location_region,
+            commune: row.location_commune,
+            quartier: row.location_quartier,
+            coordinates: row.location_lat
+              ? { lat: parseFloat(row.location_lat), lng: parseFloat(row.location_lng) }
+              : undefined,
+          },
+          isOnline: row.is_online === true,
+          preferences: {
+            ageRange: { min: row.preferences_age_min || 18, max: row.preferences_age_max || 99 },
+            maxDistance: row.preferences_max_distance || 50,
+            interestedIn: row.preferences_interested_in || [],
+          },
+          verified: row.verification_status === 'verified' || row.verified === true,
+          verificationStatus: row.verification_status || 'unverified',
+          verificationPhotoUrl: row.verification_photo_url || null,
+          verifiedAt: row.verified_at ? row.verified_at.toISOString() : null,
+          privacy: {
+            hideLastActive: row.privacy_hide_last_active === true,
+            hideOnline: row.privacy_hide_online === true,
+            incognito: row.privacy_incognito === true,
+            sharePhone: row.privacy_share_phone || 'afterMatch',
+          },
+          boostedUntil: row.boosted_until ? row.boosted_until.toISOString() : null,
+          travelMode: {
+            enabled: row.travel_mode_enabled === true,
+            location: row.travel_mode_enabled === true
+              ? {
+                  country: row.travel_mode_country || null,
+                  region: row.travel_mode_region || null,
+                  city: row.travel_mode_city || null,
+                  commune: row.travel_mode_commune || null,
+                  quartier: row.travel_mode_quartier || null,
+                  coordinates: row.travel_mode_lat
+                    ? { lat: parseFloat(row.travel_mode_lat), lng: parseFloat(row.travel_mode_lng) }
+                    : undefined,
+                }
+              : undefined,
+          },
+          createdAt: row.created_at.toISOString(),
+          lastActive: row.last_active.toISOString(),
+        },
+        action: row.action,
+        createdAt: row.created_at.toISOString(),
+      }))
+    );
+  } catch (error) {
+    console.error('Likes received error:', error);
+    res.status(500).json({ message: 'Erreur lors de la récupération des likes' });
   }
 });
 
