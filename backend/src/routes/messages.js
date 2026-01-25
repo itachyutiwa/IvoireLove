@@ -54,6 +54,48 @@ router.post('/voice', authenticateToken, voiceUpload.single('voice'), async (req
   }
 });
 
+// Upload video messages (MVP)
+const videoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const videoDir = path.join(process.env.UPLOAD_DIR || './uploads', 'video');
+    try {
+      fs.mkdirSync(videoDir, { recursive: true });
+    } catch (_e) {
+      // ignore
+    }
+    cb(null, videoDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+
+const videoUpload = multer({
+  storage: videoStorage,
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /mp4|mov|webm|mkv/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetypeOk = file.mimetype?.startsWith('video/');
+    if (extname && mimetypeOk) cb(null, true);
+    else cb(new Error('Seuls les fichiers vidéo sont autorisés'));
+  },
+});
+
+router.post('/video', authenticateToken, videoUpload.single('video'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Aucun fichier fourni' });
+    const url = `/uploads/video/${req.file.filename}`;
+    res.json({ url });
+  } catch (error) {
+    console.error('Upload video error:', error);
+    res.status(500).json({ message: 'Erreur lors de l’upload de la vidéo' });
+  }
+});
+
 // Obtenir les conversations
 router.get('/conversations', authenticateToken, async (req, res) => {
   try {
@@ -152,15 +194,15 @@ router.get('/conversations/:conversationId', authenticateToken, async (req, res)
 // Envoyer un message
 router.post('/send', authenticateToken, async (req, res) => {
   try {
-    const { receiverId, content, type, imageUrl, voiceUrl, replyToMessageId } = req.body;
+    const { receiverId, content, type, imageUrl, videoUrl, voiceUrl, replyToMessageId } = req.body;
     const senderId = req.user.userId;
 
     if (!receiverId) {
       return res.status(400).json({ message: 'Destinataire requis' });
     }
 
-    if (!content && !imageUrl && !voiceUrl) {
-      return res.status(400).json({ message: 'Contenu, image ou audio requis' });
+    if (!content && !imageUrl && !voiceUrl && !videoUrl) {
+      return res.status(400).json({ message: 'Contenu, image, audio ou vidéo requis' });
     }
 
     // Vérifier les limites d'abonnement (sauf en développement où tout est illimité)
@@ -187,6 +229,9 @@ router.post('/send', authenticateToken, async (req, res) => {
       if (msgType === 'audio' && !voiceUrl) {
         return res.status(400).json({ message: 'Fichier audio requis' });
       }
+      if (msgType === 'video' && !videoUrl) {
+        return res.status(400).json({ message: 'Fichier vidéo requis' });
+      }
       const analysis =
         msgType === 'text' || (msgType === 'image' && content)
           ? analyzeMessageContent(content || '')
@@ -212,6 +257,7 @@ router.post('/send', authenticateToken, async (req, res) => {
           riskFlags: analysis.riskFlags,
           replyToMessageId: replyToMessageId || null,
           voiceUrl: voiceUrl || null,
+          videoUrl: videoUrl || null,
         }
       );
     } catch (error) {

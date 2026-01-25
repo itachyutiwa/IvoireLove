@@ -15,9 +15,9 @@ class MessageService {
   async sendMessage(
     receiverId: string,
     content: string,
-    type: 'text' | 'image' | 'audio' = 'text',
+    type: 'text' | 'image' | 'audio' | 'video' = 'text',
     imageUrl?: string,
-    options?: { voiceUrl?: string; replyToMessageId?: string }
+    options?: { voiceUrl?: string; videoUrl?: string; replyToMessageId?: string }
   ): Promise<Message> {
     const response = await api.post<Message>('/messages/send', {
       receiverId,
@@ -25,6 +25,7 @@ class MessageService {
       type,
       imageUrl,
       voiceUrl: options?.voiceUrl,
+      videoUrl: options?.videoUrl,
       replyToMessageId: options?.replyToMessageId,
     });
     return response.data;
@@ -53,6 +54,17 @@ class MessageService {
     const formData = new FormData();
     formData.append('voice', file);
     const response = await api.post<{ url: string }>('/messages/voice', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data.url;
+  }
+
+  async uploadVideo(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('video', file);
+    const response = await api.post<{ url: string }>('/messages/video', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
