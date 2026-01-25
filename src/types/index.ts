@@ -33,6 +33,12 @@ export interface User {
   verificationStatus?: 'unverified' | 'pending' | 'verified' | 'rejected' | string;
   verificationPhotoUrl?: string | null;
   verifiedAt?: string | null;
+  privacy?: {
+    hideLastActive: boolean;
+    hideOnline: boolean;
+    incognito: boolean;
+    sharePhone: 'afterMatch' | 'afterXMessages' | 'never' | string;
+  };
   createdAt: string;
   lastActive: string;
   stats?: {

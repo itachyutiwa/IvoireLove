@@ -16,6 +16,8 @@ import {
   createSubscriptionTable,
   createPaymentTable,
   createVerificationCodeTable,
+  createReportTable,
+  createBlockTable,
 } from './models/index.js';
 import { initTestUser } from './utils/initTestUser.js';
 
@@ -25,6 +27,8 @@ import userRoutes from './routes/users.js';
 import messageRoutes from './routes/messages.js';
 import subscriptionRoutes from './routes/subscriptions.js';
 import paymentRoutes from './routes/payments.js';
+import reportRoutes from './routes/reports.js';
+import blockRoutes from './routes/blocks.js';
 
 // Import Socket.io handler
 import { setupSocket } from './socket/socketHandler.js';
@@ -68,6 +72,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/blocks', blockRoutes);
 
 // Route de santé
 app.get('/api/health', (req, res) => {
@@ -91,6 +97,8 @@ const startServer = async () => {
     await createSubscriptionTable(pgPool);
     await createPaymentTable(pgPool);
     await createVerificationCodeTable(pgPool);
+    await createReportTable(pgPool);
+    await createBlockTable(pgPool);
     console.log('✅ Database tables created');
 
     // Créer l'utilisateur de test s'il n'existe pas
@@ -107,11 +115,15 @@ const startServer = async () => {
     // Créer les dossiers uploads s'ils n'existent pas
     const uploadDir = process.env.UPLOAD_DIR || './uploads';
     const messagesUploadDir = path.join(uploadDir, 'messages');
+    const verificationUploadDir = path.join(uploadDir, 'verification');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
     if (!fs.existsSync(messagesUploadDir)) {
       fs.mkdirSync(messagesUploadDir, { recursive: true });
+    }
+    if (!fs.existsSync(verificationUploadDir)) {
+      fs.mkdirSync(verificationUploadDir, { recursive: true });
     }
 
     // Démarrer le serveur

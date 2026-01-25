@@ -4,13 +4,14 @@ import { useMessageStore } from '@/store/messageStore';
 import { messageService } from '@/services/messageService';
 import { userService } from '@/services/userService';
 import { socketService } from '@/services/socketService';
+import { moderationService } from '@/services/moderationService';
 import { useSubscription } from '@/hooks/useSubscription';
 import { SubscriptionModal } from '@/components/subscription/SubscriptionModal';
 import { MessagingMenu } from '@/components/contact/MessagingMenu';
 import { Modal } from '@/components/ui/Modal';
 import { formatRelativeTime } from '@/utils/helpers';
 import { User } from '@/types';
-import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown } from 'react-icons/io5';
+import { IoPaperPlane, IoSearch, IoImage, IoClose, IoLocation, IoAdd, IoChevronDown, IoEllipsisVertical } from 'react-icons/io5';
 import { LocationMessage } from '@/components/chat/LocationMessage';
 import toast from 'react-hot-toast';
 
@@ -53,6 +54,13 @@ export const Messages: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const RISK_FLAG_THRESHOLD = 40;
+  const [showConversationActions, setShowConversationActions] = useState(false);
+  const conversationActionsRef = useRef<HTMLDivElement>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState<string>('scam');
+  const [reportDetails, setReportDetails] = useState<string>('');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [isBlockingUser, setIsBlockingUser] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -86,6 +94,17 @@ export const Messages: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (messageMenuRef.current && !messageMenuRef.current.contains(event.target as Node)) {
         setOpenMessageMenuId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Fermer le menu actions conversation si clic extérieur
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (conversationActionsRef.current && !conversationActionsRef.current.contains(event.target as Node)) {
+        setShowConversationActions(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -262,6 +281,55 @@ export const Messages: React.FC = () => {
       toast.error('Erreur lors du chargement des conversations');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const getSelectedOtherUserId = () => {
+    if (!selectedConversationId) return null;
+    const conversation = conversations.find((c) => c.id === selectedConversationId);
+    if (!conversation?.participants?.length) return null;
+    return conversation.participants.find((id) => id !== user?.id) || null;
+  };
+
+  const handleBlockUser = async () => {
+    const otherUserId = getSelectedOtherUserId();
+    if (!otherUserId) return;
+    const ok = window.confirm("Bloquer cet utilisateur ? Vous ne verrez plus vos conversations ni profils respectifs.");
+    if (!ok) return;
+
+    try {
+      setIsBlockingUser(true);
+      await moderationService.blockUser(otherUserId);
+      toast.success('Utilisateur bloqué');
+      setShowConversationActions(false);
+      setSelectedConversationId(null);
+      await loadConversations();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erreur lors du blocage');
+    } finally {
+      setIsBlockingUser(false);
+    }
+  };
+
+  const handleSubmitReport = async () => {
+    const otherUserId = getSelectedOtherUserId();
+    if (!otherUserId || !selectedConversationId) return;
+    try {
+      setIsSubmittingReport(true);
+      await moderationService.reportUser({
+        reportedUserId: otherUserId,
+        reason: reportReason,
+        details: reportDetails,
+        conversationId: selectedConversationId,
+      });
+      toast.success('Signalement envoyé');
+      setShowReportModal(false);
+      setReportDetails('');
+      setShowConversationActions(false);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erreur lors du signalement');
+    } finally {
+      setIsSubmittingReport(false);
     }
   };
 
@@ -706,6 +774,36 @@ export const Messages: React.FC = () => {
                     }
                   })()}
                 </div>
+                <div className="relative" ref={conversationActionsRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowConversationActions((v) => !v)}
+                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-700"
+                    title="Actions"
+                    disabled={isBlockingUser}
+                  >
+                    <IoEllipsisVertical size={20} />
+                  </button>
+                  {showConversationActions && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-50">
+                      <button
+                        type="button"
+                        onClick={() => setShowReportModal(true)}
+                        className="w-full px-4 py-3 text-left text-sm font-semibold hover:bg-gray-50 transition-colors"
+                      >
+                        Signaler
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleBlockUser}
+                        disabled={isBlockingUser}
+                        className="w-full px-4 py-3 text-left text-sm font-semibold text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isBlockingUser ? 'Blocage…' : 'Bloquer'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1060,6 +1158,56 @@ export const Messages: React.FC = () => {
             onClose={() => setShowMessagingMenu(false)}
           />
         )}
+      </Modal>
+
+      {/* Modal signalement */}
+      <Modal isOpen={showReportModal} onClose={() => setShowReportModal(false)} size="md">
+        <div className="p-4">
+          <h3 className="text-lg font-bold text-gray-900 mb-2">Signaler un utilisateur</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Merci de préciser la raison. Notre équipe pourra examiner le signalement.
+          </p>
+
+          <label className="block text-sm font-medium text-gray-700 mb-1">Raison</label>
+          <select
+            value={reportReason}
+            onChange={(e) => setReportReason(e.target.value)}
+            className="input w-full mb-3"
+          >
+            <option value="scam">Arnaque / demande d'argent</option>
+            <option value="spam">Spam</option>
+            <option value="harassment">Harcèlement</option>
+            <option value="fake_profile">Faux profil</option>
+            <option value="other">Autre</option>
+          </select>
+
+          <label className="block text-sm font-medium text-gray-700 mb-1">Détails (optionnel)</label>
+          <textarea
+            value={reportDetails}
+            onChange={(e) => setReportDetails(e.target.value)}
+            rows={4}
+            className="input w-full resize-none mb-4"
+            placeholder="Expliquez brièvement…"
+          />
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowReportModal(false)}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 font-semibold"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitReport}
+              disabled={isSubmittingReport}
+              className="px-4 py-2 rounded-lg bg-[#F26E27] text-white hover:bg-[#c2581f] font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isSubmittingReport ? 'Envoi…' : 'Envoyer'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

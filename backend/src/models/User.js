@@ -30,6 +30,10 @@ export const createUserTable = async (pool) => {
       verification_status VARCHAR(20) DEFAULT 'unverified',
       verification_photo_url TEXT,
       verified_at TIMESTAMP,
+      privacy_hide_last_active BOOLEAN DEFAULT FALSE,
+      privacy_hide_online BOOLEAN DEFAULT FALSE,
+      privacy_incognito BOOLEAN DEFAULT FALSE,
+      privacy_share_phone VARCHAR(30) DEFAULT 'afterMatch',
       device_id VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -99,6 +103,30 @@ export const createUserTable = async (pool) => {
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_name='users' AND column_name='verified_at') THEN
             ALTER TABLE users ADD COLUMN verified_at TIMESTAMP;
+          END IF;
+
+          -- Ajouter privacy_hide_last_active si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='privacy_hide_last_active') THEN
+            ALTER TABLE users ADD COLUMN privacy_hide_last_active BOOLEAN DEFAULT FALSE;
+          END IF;
+
+          -- Ajouter privacy_hide_online si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='privacy_hide_online') THEN
+            ALTER TABLE users ADD COLUMN privacy_hide_online BOOLEAN DEFAULT FALSE;
+          END IF;
+
+          -- Ajouter privacy_incognito si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='privacy_incognito') THEN
+            ALTER TABLE users ADD COLUMN privacy_incognito BOOLEAN DEFAULT FALSE;
+          END IF;
+
+          -- Ajouter privacy_share_phone si elle n'existe pas
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name='users' AND column_name='privacy_share_phone') THEN
+            ALTER TABLE users ADD COLUMN privacy_share_phone VARCHAR(30) DEFAULT 'afterMatch';
           END IF;
         END $$;
       `);
@@ -289,6 +317,7 @@ export const UserModel = {
       verifiedAt: 'verified_at',
       location: null, // Géré séparément
       preferences: null, // Géré séparément
+      privacy: null, // Géré séparément
     };
 
     const fields = [];
@@ -332,6 +361,19 @@ export const UserModel = {
         paramCount++;
         fields.push(`preferences_interested_in = $${paramCount}`);
         values.push(updates.preferences.interestedIn || []);
+        paramCount++;
+      } else if (key === 'privacy' && updates.privacy) {
+        fields.push(`privacy_hide_last_active = $${paramCount}`);
+        values.push(updates.privacy.hideLastActive === true);
+        paramCount++;
+        fields.push(`privacy_hide_online = $${paramCount}`);
+        values.push(updates.privacy.hideOnline === true);
+        paramCount++;
+        fields.push(`privacy_incognito = $${paramCount}`);
+        values.push(updates.privacy.incognito === true);
+        paramCount++;
+        fields.push(`privacy_share_phone = $${paramCount}`);
+        values.push(updates.privacy.sharePhone || 'afterMatch');
         paramCount++;
       } else if (fieldMap[key]) {
         const dbKey = fieldMap[key];
@@ -418,6 +460,7 @@ export const UserModel = {
     query += `
       FROM users
       WHERE id != $1
+        AND (privacy_incognito IS NOT TRUE)
         AND gender = ANY($2::text[])
         AND date_of_birth BETWEEN $3 AND $4
     `;
@@ -541,6 +584,12 @@ export const UserModel = {
       verificationStatus: row.verification_status || 'unverified',
       verificationPhotoUrl: row.verification_photo_url || null,
       verifiedAt: row.verified_at ? row.verified_at.toISOString() : null,
+      privacy: {
+        hideLastActive: row.privacy_hide_last_active === true,
+        hideOnline: row.privacy_hide_online === true,
+        incognito: row.privacy_incognito === true,
+        sharePhone: row.privacy_share_phone || 'afterMatch',
+      },
       createdAt: row.created_at.toISOString(),
       lastActive: row.last_active.toISOString(),
     };
