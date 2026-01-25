@@ -1,5 +1,10 @@
 // SafetyEngine: détection simple anti-arnaque (MVP)
-// Objectif: attribuer un score + flags sans casser l'existant.
+/**
+ * Convert a value to a lowercase, diacritic-free normalized string.
+ *
+ * @param {*} input - Value to normalize; will be stringified. Defaults to an empty string when falsy.
+ * @returns {string} The normalized string with Unicode canonical decomposition applied and diacritic marks removed.
+ */
 
 function normalize(input = '') {
   return (input || '')
@@ -9,14 +14,19 @@ function normalize(input = '') {
     .replace(/\p{Diacritic}/gu, '');
 }
 
+/**
+ * Remove duplicate and falsy values from an array while preserving the order of first occurrences.
+ * @param {Array} arr - Array of values to process; may contain mixed types.
+ * @returns {Array} A new array with duplicates removed and all falsy values (false, 0, '', null, undefined, NaN) filtered out. 
+ */
 function uniq(arr) {
   return Array.from(new Set(arr)).filter(Boolean);
 }
 
 /**
- * Analyse un message texte et retourne un score de risque + flags.
- * @param {string} content
- * @returns {{ riskScore: number, riskFlags: string[], action: 'allow'|'flag'|'block' }}
+ * Analyze a text message and produce a risk assessment with flags and a recommended action.
+ * @param {string} content - Raw message text to analyze.
+ * @returns {{ riskScore: number, riskFlags: string[], action: 'allow'|'flag'|'block' }} Object containing the computed riskScore (0–100), deduplicated riskFlags, and action: 'block' if score >= 85, 'flag' if score >= 40, 'allow' otherwise.
  */
 export function analyzeMessageContent(content) {
   const text = normalize(content);
@@ -96,4 +106,3 @@ export function analyzeMessageContent(content) {
   const action = score >= 85 ? 'block' : score >= 40 ? 'flag' : 'allow';
   return { riskScore: score, riskFlags, action };
 }
-
