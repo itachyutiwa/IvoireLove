@@ -6,6 +6,7 @@ import { socketService } from '@/services/socketService';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Header } from '@/components/layout/Header';
 import { BottomNav } from '@/components/layout/BottomNav';
+import { useInactivityTimeout } from '@/hooks/useInactivityTimeout';
 
 // Pages
 import { Login } from '@/pages/Login';
@@ -21,8 +22,12 @@ import { Subscription } from '@/pages/Subscription';
 
 import '@/styles/index.css';
 
-function App() {
+// Composant interne pour utiliser le hook d'inactivité (doit être dans BrowserRouter)
+function AppContent() {
   const { isAuthenticated, checkAuth, isLoading, presenceMode } = useAuthStore();
+
+  // Timeout d'inactivité : 1 minute (doit être appelé dans BrowserRouter)
+  useInactivityTimeout(1);
 
   useEffect(() => {
     checkAuth();
@@ -40,7 +45,6 @@ function App() {
   }, [isAuthenticated, isLoading, presenceMode]);
 
   return (
-    <BrowserRouter>
       <div className="min-h-screen bg-gray-50">
         <Header />
         <main className="pb-20 md:pb-0">
@@ -149,6 +153,13 @@ function App() {
           }}
         />
       </div>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
     </BrowserRouter>
   );
 }

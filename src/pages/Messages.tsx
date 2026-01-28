@@ -615,7 +615,14 @@ export const Messages: React.FC = () => {
           const blob = new Blob(cameraChunksRef.current, { type: recorder.mimeType || 'video/webm' });
           if (blob.size < 2048) return;
           setUploadingVideo(true);
-          const file = new File([blob], `video-${Date.now()}.webm`, { type: blob.type || 'video/webm' });
+          const mime = blob.type || recorder.mimeType || 'video/webm';
+          const ext =
+            mime.includes('mp4') ? 'mp4' :
+            mime.includes('quicktime') ? 'mov' :
+            mime.includes('x-matroska') ? 'mkv' :
+            mime.includes('webm') ? 'webm' :
+            'webm';
+          const file = new File([blob], `video-${Date.now()}.${ext}`, { type: mime });
           const url = await messageService.uploadVideo(file);
           const fullUrl = url.startsWith('http')
             ? url
